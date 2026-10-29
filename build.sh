@@ -7,7 +7,7 @@ APP="Today HUD.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 
-swiftc -O -swift-version 5 -target arm64-apple-macos13.0 main.swift -o "$APP/Contents/MacOS/TodayHUD"
+swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos13.0" main.swift -o "$APP/Contents/MacOS/TodayHUD"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

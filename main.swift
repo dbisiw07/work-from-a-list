@@ -34,9 +34,13 @@ enum Store {
             .appendingPathComponent("TodayHUD/today.json")
     }
 
-    /// The list's day: before the reset hour it still belongs to yesterday.
+    /// The list's day: before the reset hour it still belongs to yesterday. Goes by
+    /// the clock hour, not "6 hours ago", so daylight saving days reset on time too.
     static func day(_ now: Date = Date()) -> Date {
-        Calendar.current.startOfDay(for: now.addingTimeInterval(-Double(resetHour) * 3600))
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: now)
+        guard cal.component(.hour, from: now) < resetHour else { return start }
+        return cal.date(byAdding: .day, value: -1, to: start) ?? start
     }
 
     static func dayKey(_ now: Date = Date()) -> String {
@@ -195,8 +199,13 @@ final class TodayModel: ObservableObject {
         saveWork = nil
     }
 
+    /// A task is one line; pasted line breaks become spaces.
+    static func oneLine(_ text: String) -> String {
+        text.components(separatedBy: .newlines).joined(separator: " ")
+    }
+
     func add() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = Self.oneLine(draft).trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, !isFull else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { items.append(Item(text: text)) }
         draft = ""
@@ -206,7 +215,7 @@ final class TodayModel: ObservableObject {
 
     func setText(_ id: UUID, _ text: String) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].text = text
+        items[i].text = Self.oneLine(text)
     }
 
     /// An item edited down to nothing is removed.
@@ -387,9 +396,9 @@ struct TodayView: View {
                             .frame(height: CGFloat(Store.visibleRows) * ItemRow.height(s))
                             // Only the rows in view can be dropped on.
                             .background(FrameReporter { model.listRect = $0 })
-                            // A newly added item scrolls into view.
-                            .onChange(of: model.items.count) { _ in
-                                if let last = model.items.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+                            // A newly added item scrolls into view; removing one elsewhere doesn't jump.
+                            .onChange(of: model.items.last?.id) { last in
+                                if let last { proxy.scrollTo(last, anchor: .bottom) }
                             }
                     }
                 } else if !model.items.isEmpty {
@@ -527,8 +536,13 @@ struct ItemRow: View {
                 .foregroundStyle(item.done ? Theme.green : isNow ? Theme.progress : hovered ? Theme.text : Theme.dim)
                 .scaleEffect(pop ? 1.3 : 1)
                 .contentShape(Rectangle())
-                .onTapGesture { model.toggle(item.id) }
+                .onTapGesture {
+                    if hasFocus { finish() }  // its text field goes away, so hand the keyboard back
+                    model.toggle(item.id)
+                }
                 .help(item.done ? "Mark as not done" : "Mark as done")
+                .accessibilityLabel(item.done ? "Mark as not done" : "Mark as done")
+                .accessibilityAddTraits(.isButton)
             // Done items are plain text with a line through it; uncheck an item to edit it again.
             if item.done {
                 Text(item.text)
@@ -568,15 +582,22 @@ struct ItemRow: View {
                     .onTapGesture { model.setNow(item.id) }
                     .opacity(isNow || hovered ? 1 : 0)
                     .help(isNow ? "Stop working on this" : "Working on this now")
+                    .accessibilityLabel(isNow ? "Stop working on this" : "Working on this now")
+                    .accessibilityAddTraits(.isButton)
             }
             Image(systemName: "xmark")
                 .font(.system(size: 9 * scale, weight: .bold))
                 .foregroundStyle(Theme.dim)
                 .frame(width: 16 * scale, height: 16 * scale)
                 .contentShape(Rectangle())
-                .onTapGesture { model.remove(item.id) }
+                .onTapGesture {
+                    if hasFocus { finish() }
+                    model.remove(item.id)
+                }
                 .opacity(hovered ? 1 : 0)
                 .help("Remove")
+                .accessibilityLabel("Remove")
+                .accessibilityAddTraits(.isButton)
         }
         .frame(height: Self.height(scale))
         .padding(.horizontal, 6 * scale)
@@ -634,6 +655,7 @@ struct UndoRow: View {
                 .padding(.horizontal, 4 * scale)
                 .contentShape(Rectangle())
                 .onTapGesture { model.undoRemove() }
+                .accessibilityAddTraits(.isButton)
         }
         .frame(height: ItemRow.height(scale))
         .padding(.horizontal, 6 * scale)
@@ -666,6 +688,8 @@ struct AddField: View {
                     hasFocus = true
                 }
                 .help("Add")
+                .accessibilityLabel("Add")
+                .accessibilityAddTraits(.isButton)
             TextField("", text: $model.draft,
                       prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, break it down, sweat the details")
                           .foregroundColor(Theme.faint))
@@ -1030,6 +1054,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.$theme.dropFirst().receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.applyAppearance() }
             .store(in: &subscriptions)
+        // Unplugging a display can leave the HUD off every screen; bring it back.
+        center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil,
+                           queue: .main) { [weak self] _ in
+            guard let self else { return }
+            if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(self.panel.frame) }) {
+                self.placeInitially()
+            }
+        }
         registerHotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey) { [weak self] in self?.toggleHUD() }
 
         setupStatusItem()
@@ -1170,13 +1202,14 @@ extension AppDelegate: NSMenuDelegate {
         menu.addItem(NSMenuItem(title: total == 0 ? "Nothing on today's list yet"
                                     : "Today · \(model.doneCount) of \(total) done",
                                 action: nil, keyEquivalent: ""))
+        func short(_ text: String) -> String { text.count > 60 ? text.prefix(59) + "…" : text }
         if let now = model.nowItem {
-            let entry = NSMenuItem(title: "Stop Working on “\(now.text)”", action: #selector(clearNow), keyEquivalent: "")
+            let entry = NSMenuItem(title: "Stop Working on “\(short(now.text))”", action: #selector(clearNow), keyEquivalent: "")
             entry.target = self
             menu.addItem(entry)
         }
         for item in model.items {
-            let entry = NSMenuItem(title: item.text, action: #selector(toggleItem(_:)), keyEquivalent: "")
+            let entry = NSMenuItem(title: short(item.text), action: #selector(toggleItem(_:)), keyEquivalent: "")
             entry.target = self
             entry.representedObject = item.id
             entry.state = item.done ? .on : item.id == model.nowItem?.id ? .mixed : .off
