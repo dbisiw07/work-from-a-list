@@ -126,6 +126,8 @@ final class TodayModel: ObservableObject {
     private var justChecked: UUID?
     var onFinishEditing: (() -> Void)?
     var onHide: (() -> Void)?
+    /// Lets the HUD take the keyboard for a click that isn't on a text field.
+    var onTakeKeyboard: (() -> Void)?
     var soundOn: Bool {
         get { UserDefaults.standard.object(forKey: "soundOn") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "soundOn") }
@@ -656,6 +658,14 @@ struct AddField: View {
                 .font(.system(size: 14 * scale, weight: .semibold))
                 .foregroundStyle(focused ? Theme.accent : Theme.dim)
                 .frame(width: 17 * scale)
+                .contentShape(Rectangle())
+                // Adds what you've typed, or puts the cursor on the line to start.
+                .onTapGesture {
+                    if !model.draft.trimmingCharacters(in: .whitespaces).isEmpty { model.add() }
+                    model.onTakeKeyboard?()
+                    hasFocus = true
+                }
+                .help("Add")
             TextField("", text: $model.draft,
                       prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, break it down")
                           .foregroundColor(Theme.faint))
@@ -989,6 +999,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onHide = { [weak self] in
             self?.userHidden = true
             self?.updateVisibility()
+        }
+        model.onTakeKeyboard = { [weak self] in
+            self?.panel.allowKey = true
+            self?.panel.makeKey()
         }
         // Hand the keyboard back to whatever app you were in once you're done typing.
         model.onFinishEditing = { [weak self] in
