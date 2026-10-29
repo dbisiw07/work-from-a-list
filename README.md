@@ -12,9 +12,9 @@ the same on any wallpaper, in light or dark mode.
 - Click "What matters today?", type an item and press Return. The box stays
   ready for the next one. Press Return on an empty line, or Esc, and the
   keyboard goes back to the app you were in.
-- Click a circle to check an item off; done items are struck through (uncheck
+- Click a circle to check an item off; the circle pops and a line draws through the text (uncheck
   one to edit it again). Click an item's text to edit it, and hover a
-  row and click × to remove it. An item you edit down to nothing is removed.
+  row and click × to remove it (an Undo shows in its place for 5 seconds). An item you edit down to nothing is removed.
 - Drag a task up or down to reorder it; the others slide out of the way. A
   plain click still edits the text or checks it off, and dragging the header
   moves the whole HUD.

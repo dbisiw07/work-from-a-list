@@ -118,6 +118,12 @@ final class TodayModel: ObservableObject {
     var listRect: CGRect = .zero
     /// The row being dragged to a new place.
     @Published var draggingId: UUID?
+    /// The last item you removed, offered back for a few seconds.
+    struct Removed { let item: Item; let index: Int; let wasNow: Bool }
+    @Published private(set) var removed: Removed?
+    private var undoWork: DispatchWorkItem?
+    /// The item just checked off, so its row plays the strike once.
+    private var justChecked: UUID?
     var onFinishEditing: (() -> Void)?
     var onHide: (() -> Void)?
     var soundOn: Bool {
@@ -158,6 +164,7 @@ final class TodayModel: ObservableObject {
             draft = ""
             items = []
             nowId = nil
+            removed = nil
         }
         scheduleReset()
     }
@@ -204,16 +211,24 @@ final class TodayModel: ObservableObject {
     func commit(_ id: UUID) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         let text = items[i].text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty { remove(id) } else { items[i].text = text }
+        if text.isEmpty { remove(id, undoable: false) } else { items[i].text = text }
     }
 
     func toggle(_ id: UUID) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        if !items[i].done { justChecked = id }
         withAnimation(.easeOut(duration: 0.2)) {
             items[i].done.toggle()
             if items[i].done, nowId == id { nowId = nil }  // finishing it ends "now"
         }
         if allDone { celebrate() }
+    }
+
+    /// True once, right after the item was checked off.
+    func takeJustChecked(_ id: UUID) -> Bool {
+        guard justChecked == id else { return false }
+        justChecked = nil
+        return true
     }
 
     func row(at point: CGPoint) -> UUID? {
@@ -237,14 +252,40 @@ final class TodayModel: ObservableObject {
         withAnimation(.easeOut(duration: 0.2)) { nowId = nowId == id ? nil : id }
     }
 
-    func remove(_ id: UUID) {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { items.removeAll { $0.id == id } }
+    func remove(_ id: UUID, undoable: Bool = true) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            if undoable { removed = Removed(item: items[i], index: i, wasNow: nowId == id) }
+            items.remove(at: i)
+        }
+        rowFrames[id] = nil
         if hoveredRow == id { hoveredRow = nil }
         if nowId == id { nowId = nil }
+        guard undoable else { return }
+        undoWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(.easeOut(duration: 0.25)) { self?.removed = nil }
+        }
+        undoWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+    }
+
+    /// Puts the last removed item back where it was.
+    func undoRemove() {
+        guard let r = removed, !isFull else { return }
+        undoWork?.cancel()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            items.insert(r.item, at: min(r.index, items.count))
+            if r.wasNow { nowId = r.item.id }
+            removed = nil
+        }
     }
 
     func clearDone() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { items.removeAll(where: \.done) }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            items.removeAll(where: \.done)
+            removed = nil
+        }
     }
 
     private func celebrate() {
@@ -401,9 +442,13 @@ struct TodayView: View {
 
     private var rows: some View {
         VStack(spacing: 0) {
-            ForEach(model.items) { item in
+            ForEach(Array(model.items.enumerated()), id: \.element.id) { i, item in
+                if let removed = model.removed, removed.index == i { UndoRow(model: model, removed: removed, scale: s) }
                 ItemRow(model: model, item: item, scale: s)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            if let removed = model.removed, removed.index >= model.items.count {
+                UndoRow(model: model, removed: removed, scale: s)
             }
         }
         // Inside the scroll view the content runs past what's visible; that one reports instead.
@@ -462,6 +507,9 @@ struct ItemRow: View {
     let item: Item
     let scale: CGFloat
     @FocusState private var hasFocus: Bool
+    /// The check-off: the circle pops and the strike draws across.
+    @State private var pop = false
+    @State private var struck = true
 
     private var hovered: Bool { model.hoveredRow == item.id }
     private var isNow: Bool { model.nowId == item.id && !item.done }
@@ -475,18 +523,29 @@ struct ItemRow: View {
             Image(systemName: item.done ? "checkmark.circle" : isNow ? "circle.lefthalf.filled" : "circle")
                 .font(.system(size: 17 * scale, weight: item.done || isNow ? .semibold : .regular))
                 .foregroundStyle(item.done ? Theme.green : isNow ? Theme.progress : hovered ? Theme.text : Theme.dim)
+                .scaleEffect(pop ? 1.3 : 1)
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
-            // Done items are plain text with a real strike-through, so the line always
-            // shows; uncheck an item to edit it again.
+            // Done items are plain text with a line through it; uncheck an item to edit it again.
             if item.done {
                 Text(item.text)
                     .font(font)
-                    .strikethrough(true, color: Theme.dim)
                     .foregroundStyle(Theme.faint)
                     .lineLimit(1)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Theme.dim)
+                            .frame(height: max(1, 1.4 * scale))
+                            .offset(y: 1 * scale)
+                            .scaleEffect(x: struck ? 1 : 0, anchor: .leading)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .onAppear {
+                        guard model.takeJustChecked(item.id) else { return }
+                        struck = false
+                        withAnimation(.easeOut(duration: 0.3).delay(0.05)) { struck = true }
+                    }
             } else {
                 TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
                     .textFieldStyle(.plain)
@@ -531,6 +590,13 @@ struct ItemRow: View {
         .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6 * scale, y: 2 * scale)
         .zIndex(dragging ? 1 : 0)
         .background(FrameReporter { model.rowFrames[item.id] = $0 })
+        .onChange(of: item.done) { done in
+            guard done else { return }
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) { pop = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { pop = false }
+            }
+        }
         .onHover { inside in
             if inside { model.hoveredRow = item.id } else if hovered { model.hoveredRow = nil }
         }
@@ -540,6 +606,39 @@ struct ItemRow: View {
         hasFocus = false
         model.commit(item.id)
         model.onFinishEditing?()
+    }
+}
+
+/// Takes a removed item's place for a few seconds so you can put it back.
+struct UndoRow: View {
+    @ObservedObject var model: TodayModel
+    let removed: TodayModel.Removed
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 10 * scale) {
+            Image(systemName: "arrow.uturn.backward")
+                .font(.system(size: 12 * scale, weight: .semibold))
+                .foregroundStyle(Theme.faint)
+                .frame(width: 20.5 * scale)  // as wide as a row's circle, so the text lines up
+            Text("Removed “\(removed.item.text)”")
+                .font(Theme.font(14 * scale))
+                .foregroundStyle(Theme.faint)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Undo")
+                .font(Theme.font(14 * scale, bold: true))
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 4 * scale)
+                .contentShape(Rectangle())
+                .onTapGesture { model.undoRemove() }
+        }
+        .frame(height: ItemRow.height(scale))
+        .padding(.horizontal, 6 * scale)
+        .overlay(alignment: .bottom) {
+            if Theme.choice.ruled { Rectangle().fill(Theme.rule.opacity(0.6)).frame(height: 1) }
+        }
+        .transition(.opacity)
     }
 }
 
