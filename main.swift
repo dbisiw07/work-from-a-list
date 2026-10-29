@@ -204,48 +204,35 @@ final class TodayModel: ObservableObject {
 
 // MARK: - Views
 
-struct VisualEffect: NSViewRepresentable {
-    let radius: CGFloat
+/// A blackboard with chalk writing. The board is opaque on purpose: it reads the
+/// same on any wallpaper, in light or dark mode, and skips a live blur.
+enum Chalk {
+    static let board = [Color(red: 0.13, green: 0.14, blue: 0.14), Color(red: 0.07, green: 0.08, blue: 0.08)]
+    static let white = Color(red: 0.97, green: 0.96, blue: 0.92)  // chalk is a touch warm
+    static let dim = white.opacity(0.65)
+    static let faint = white.opacity(0.42)
+    static let yellow = Color(red: 0.99, green: 0.88, blue: 0.52)
+    static let green = Color(red: 0.62, green: 0.93, blue: 0.62)
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = .hudWindow
-        v.blendingMode = .behindWindow
-        v.state = .active
-        return v
+    /// Chalkboard SE ships with macOS; it looks hand-written but stays legible.
+    static func font(_ size: CGFloat, bold: Bool = false) -> Font {
+        .custom(bold ? "ChalkboardSE-Bold" : "ChalkboardSE-Regular", size: size)
     }
-
-    // Round the blur itself (SwiftUI clipping doesn't reach AppKit views),
-    // so the window shadow follows the card instead of a square outline.
-    func updateNSView(_ v: NSVisualEffectView, context: Context) {
-        guard v.maskImage?.capInsets.top != radius else { return }
-        let side = radius * 2 + 1
-        let mask = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-            return true
-        }
-        mask.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-        mask.resizingMode = .stretch
-        v.maskImage = mask
-    }
-}
-
-enum Palette {
-    static let calm = [Color(red: 0.40, green: 0.93, blue: 0.88), Color(red: 0.36, green: 0.55, blue: 1.00)]
-    static let fresh = [Color(red: 0.55, green: 1.00, blue: 0.60), Color(red: 0.20, green: 0.80, blue: 0.50)]
 }
 
 struct TodayView: View {
     @ObservedObject var model: TodayModel
 
     private var s: CGFloat { model.scale }
-    private var radius: CGFloat { 18 * s }
+    private var radius: CGFloat { 16 * s }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10 * s) {
+        VStack(alignment: .leading, spacing: 8 * s) {
             header
+            // A chalk rule under the heading.
+            Capsule().fill(Chalk.white.opacity(0.22)).frame(height: 1.5 * s)
             if !model.items.isEmpty {
-                VStack(spacing: 2 * s) {
+                VStack(spacing: 0) {
                     ForEach(model.items) { item in
                         ItemRow(model: model, item: item, scale: s)
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -254,32 +241,27 @@ struct TodayView: View {
             }
             if model.isFull {
                 Text("That's seven. Finish one before adding more.")
-                    .font(.system(size: 11 * s, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .padding(.horizontal, 8 * s)
+                    .font(Chalk.font(12 * s))
+                    .foregroundStyle(Chalk.dim)
+                    .padding(.horizontal, 6 * s)
+                    .padding(.top, 2 * s)
             } else {
                 AddField(model: model, scale: s)
             }
         }
-        .padding(14 * s)
+        .padding(16 * s)
         .frame(width: 300 * s, alignment: .leading)
         .background(
-            // A soft top sheen gives the glass some depth.
-            LinearGradient(colors: [.white.opacity(model.hover ? 0.12 : 0.08), .black.opacity(0.15)],
-                           startPoint: .top, endPoint: .bottom)
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(LinearGradient(colors: Chalk.board, startPoint: .top, endPoint: .bottom))
         )
-        .background(VisualEffect(radius: radius))
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(
-                    model.allDoneGlow
-                        ? AnyShapeStyle(LinearGradient(colors: Palette.fresh, startPoint: .top, endPoint: .bottom))
-                        : AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.06)],
-                                                       startPoint: .top, endPoint: .bottom)),
-                    lineWidth: model.allDoneGlow ? 2 * s : 1)
+                .strokeBorder(model.allDoneGlow ? Chalk.green.opacity(0.85) : Chalk.white.opacity(0.14),
+                              lineWidth: model.allDoneGlow ? 2 * s : 1)
         )
         .overlay(alignment: .bottomTrailing) { ResizeGrip(model: model, scale: s) }
+        .tint(Chalk.yellow)  // chalk-colored caret instead of system blue
         .contentShape(Rectangle())
         .onHover { if model.hover != $0 { model.hover = $0 } }
         .contextMenu {
@@ -294,47 +276,46 @@ struct TodayView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10 * s) {
-            VStack(alignment: .leading, spacing: 1 * s) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(model.allDone ? "All done ✓" : "Today")
-                    .font(.system(size: 18 * s, weight: .bold, design: .rounded))
-                    .foregroundStyle(model.allDone ? Palette.fresh[0] : .white)
+                    .font(Chalk.font(22 * s, bold: true))
+                    .foregroundStyle(model.allDone ? Chalk.green : Chalk.white)
                 Text(Store.day().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(.system(size: 11 * s, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(Chalk.font(12 * s))
+                    .foregroundStyle(Chalk.dim)
             }
             Spacer(minLength: 0)
             if model.hover {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 15 * s))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Chalk.white)
                     .contentShape(Rectangle())
                     .onTapGesture { model.onHide?() }
                     .help("Hide HUD — stays in the menu bar (⌃⌥T brings it back)")
             }
             progress
         }
-        .padding(.horizontal, 4 * s)
+        .padding(.horizontal, 2 * s)
     }
 
-    /// Done out of total, as a small ring.
+    /// Done out of total, as a chalk ring.
     private var progress: some View {
         let total = model.items.count
         let fraction = total == 0 ? 0 : CGFloat(model.doneCount) / CGFloat(total)
-        let colors = model.allDone ? Palette.fresh : Palette.calm
         return ZStack {
-            Circle().stroke(.white.opacity(0.1), lineWidth: 4 * s)
+            Circle().stroke(Chalk.white.opacity(0.12), lineWidth: 3.5 * s)
             Circle()
                 .trim(from: 0, to: fraction)
-                .stroke(AngularGradient(colors: colors + [colors[0]], center: .center),
-                        style: StrokeStyle(lineWidth: 4 * s, lineCap: .round))
+                .stroke(model.allDone ? Chalk.green : Chalk.white,
+                        style: StrokeStyle(lineWidth: 3.5 * s, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(model.doneCount)/\(total)")
-                .font(.system(size: 10 * s, weight: .bold, design: .rounded))
+                .font(Chalk.font(11 * s, bold: true))
                 .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(Chalk.white)
         }
-        .frame(width: 36 * s, height: 36 * s)
+        .frame(width: 38 * s, height: 38 * s)
         .animation(.easeOut(duration: 0.3), value: fraction)
         .help("\(model.doneCount) of \(total) done")
     }
@@ -347,26 +328,38 @@ struct ItemRow: View {
     @FocusState private var hasFocus: Bool
 
     private var hovered: Bool { model.hoveredRow == item.id }
+    private var font: Font { Chalk.font(15 * scale) }
 
     var body: some View {
         HStack(spacing: 10 * scale) {
-            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 17 * scale, weight: .medium))
-                .foregroundStyle(item.done ? Palette.fresh[0] : .white.opacity(hovered ? 0.7 : 0.45))
+            Image(systemName: item.done ? "checkmark.circle" : "circle")
+                .font(.system(size: 17 * scale, weight: item.done ? .semibold : .regular))
+                .foregroundStyle(item.done ? Chalk.green : hovered ? Chalk.white : Chalk.dim)
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
             TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13 * scale, weight: .medium, design: .rounded))
-                .foregroundStyle(item.done ? .white.opacity(0.4) : .white.opacity(0.92))
+                .font(font)
+                .foregroundStyle(item.done ? Chalk.faint : Chalk.white)
                 .lineLimit(1)
                 .focused($hasFocus)
                 .onSubmit { finish() }
                 .onExitCommand { finish() }
+                // Text fields can't strike through, so a chalk line is drawn over done items.
+                .overlay(alignment: .leading) {
+                    if item.done && !hasFocus {
+                        Text(item.text)
+                            .font(font)
+                            .lineLimit(1)
+                            .hidden()
+                            .overlay { Capsule().fill(Chalk.faint).frame(height: 1.5 * scale) }
+                            .allowsHitTesting(false)
+                    }
+                }
             Image(systemName: "xmark")
                 .font(.system(size: 9 * scale, weight: .bold))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Chalk.dim)
                 .frame(width: 16 * scale, height: 16 * scale)
                 .contentShape(Rectangle())
                 .onTapGesture { model.remove(item.id) }
@@ -374,10 +367,10 @@ struct ItemRow: View {
                 .help("Remove")
         }
         .padding(.vertical, 6 * scale)
-        .padding(.horizontal, 8 * scale)
+        .padding(.horizontal, 6 * scale)
         .background(
-            RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
-                .fill(.white.opacity(hovered ? 0.07 : 0))
+            RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                .fill(Chalk.white.opacity(hovered ? 0.06 : 0))
         )
         .onHover { inside in
             if inside { model.hoveredRow = item.id } else if hovered { model.hoveredRow = nil }
@@ -391,6 +384,7 @@ struct ItemRow: View {
     }
 }
 
+/// A line to write on, like the next empty line of the board.
 struct AddField: View {
     @ObservedObject var model: TodayModel
     let scale: CGFloat
@@ -400,18 +394,18 @@ struct AddField: View {
 
     var body: some View {
         HStack(spacing: 10 * scale) {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 17 * scale, weight: .medium))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(focused ? Palette.calm[0] : .white.opacity(0.4))
+            Image(systemName: "plus")
+                .font(.system(size: 14 * scale, weight: .semibold))
+                .foregroundStyle(focused ? Chalk.yellow : Chalk.dim)
+                .frame(width: 17 * scale)
             TextField("", text: $model.draft,
                       prompt: Text(model.items.isEmpty ? "What matters today?" : "Add to today")
-                          .foregroundColor(.white.opacity(0.4)))
+                          .foregroundColor(Chalk.faint))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13 * scale, weight: .medium, design: .rounded))
-                .foregroundStyle(.white)
+                .font(Chalk.font(15 * scale))
+                .foregroundStyle(Chalk.white)
                 .focused($hasFocus)
-                // Return adds and keeps the field ready for the next item.
+                // Return adds and keeps the line ready for the next item.
                 .onSubmit {
                     if model.draft.trimmingCharacters(in: .whitespaces).isEmpty { return done() }
                     model.add()
@@ -420,15 +414,13 @@ struct AddField: View {
                 .onExitCommand { done() }
         }
         .padding(.vertical, 7 * scale)
-        .padding(.horizontal, 8 * scale)
-        .background(
-            RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
-                .fill(.white.opacity(focused ? 0.10 : 0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
-                .strokeBorder(focused ? Palette.calm[0].opacity(0.6) : .clear, lineWidth: 1)
-        )
+        .padding(.horizontal, 6 * scale)
+        .overlay(alignment: .bottom) {
+            Capsule()
+                .fill(focused ? Chalk.yellow.opacity(0.75) : Chalk.white.opacity(0.18))
+                .frame(height: 1.5 * scale)
+                .padding(.horizontal, 6 * scale)
+        }
         .help("Return adds it · Return on an empty line or Esc when you're done")
     }
 
@@ -610,7 +602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .vibrantDark)
+        panel.appearance = NSAppearance(named: .darkAqua)  // white caret and menus on the board
 
         host = HUDHostingView(rootView: TodayView(model: model))
         host.sizingOptions = []
@@ -705,6 +697,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if want {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
+            // SwiftUI parks the cursor in the first field on its own, which shows a
+            // stray selection; nothing should be focused until you click in.
+            DispatchQueue.main.async { [weak self] in self?.panel.makeFirstResponder(nil) }
         } else {
             model.onFinishEditing?()
         }

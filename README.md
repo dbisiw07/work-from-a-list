@@ -1,7 +1,12 @@
 # Today HUD
 
-A floating list of what you're working on today, in the same glass style as
-Focus HUD. Seven items at most, so the list stays honest.
+A floating list of what you're working on today, written like chalk on a
+blackboard. Seven items at most, so the list stays honest.
+
+The board is opaque near-black with warm chalk-white writing in Chalkboard SE,
+a font that ships with macOS. It reads the same on any wallpaper, in light or
+dark mode. Done items get a green chalk check and a line through them, and the
+line you're writing on lights up chalk-yellow.
 
 - Click "What matters today?", type an item and press Return. The box stays
   ready for the next one. Press Return on an empty line, or Esc, and the
@@ -9,7 +14,7 @@ Focus HUD. Seven items at most, so the list stays honest.
 - Click a circle to check an item off, click its text to edit it, and hover a
   row and click × to remove it. An item you edit down to nothing is removed.
 - The header shows the date and a ring with done/total. When the last item is
-  checked off, the card glows green, says "All done ✓", and plays a soft chime.
+  checked off, the board glows green, says "All done ✓", and plays a soft chime.
 - At seven items the add box is replaced by "That's seven. Finish one before
   adding more."
 - Drag it anywhere and resize it from the bottom-right corner, or right-click →
