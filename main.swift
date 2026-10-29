@@ -81,11 +81,8 @@ enum Store {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data),
               file.day == dayKey() else { return File(day: dayKey(), items: []) }
-        // Urgent first, then the other open tasks, then done ones, each keeping its order.
-        let items = Array(file.items.prefix(maxItems))
-        let sorted = items.filter { $0.urgent && !$0.done } + items.filter { !$0.urgent && !$0.done }
-            + items.filter(\.done)
-        return File(day: file.day, items: sorted,
+        // Kept in the order you left it, including anything you dragged.
+        return File(day: file.day, items: Array(file.items.prefix(maxItems)),
                     now: file.now, nowSince: file.nowSince)
     }
 
@@ -289,15 +286,11 @@ final class TodayModel: ObservableObject {
         return items.first { rowFrames[$0.id]?.contains(point) == true }?.id
     }
 
-    /// Urgent, other open, done: dragging reorders within a group.
-    static func group(_ item: Item) -> Int { item.done ? 2 : item.urgent ? 0 : 1 }
-
     /// Moves the dragged item into the slot of the row under the cursor.
     func drag(to point: CGPoint) {
         guard let id = draggingId, let from = items.firstIndex(where: { $0.id == id }),
               let target = row(at: point), target != id,
-              let to = items.firstIndex(where: { $0.id == target }),
-              Self.group(items[from]) == Self.group(items[to]) else { return }  // stays in its group
+              let to = items.firstIndex(where: { $0.id == target }) else { return }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             items.insert(items.remove(at: from), at: to)
         }
