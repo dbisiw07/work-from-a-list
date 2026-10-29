@@ -49,22 +49,24 @@ enum Store {
                                   matchingPolicy: .nextTime) ?? now.addingTimeInterval(3600)
     }
 
-    private struct File: Codable {
+    /// `now` is the item you're working on right now, if any.
+    struct File: Codable {
         var day: String
         var items: [Item]
+        var now: UUID?
     }
 
-    static func load() -> [Item] {
+    static func load() -> File {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data),
-              file.day == dayKey() else { return [] }
-        return Array(file.items.prefix(maxItems))
+              file.day == dayKey() else { return File(day: dayKey(), items: []) }
+        return File(day: file.day, items: Array(file.items.prefix(maxItems)), now: file.now)
     }
 
-    static func save(_ items: [Item]) {
+    static func save(_ items: [Item], now: UUID?) {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(File(day: dayKey(), items: items)).write(to: url, options: .atomic)
+            try JSONEncoder().encode(File(day: dayKey(), items: items, now: now)).write(to: url, options: .atomic)
         } catch {
             NSLog("Today HUD: couldn't save list: \(error)")
         }
@@ -74,7 +76,11 @@ enum Store {
 // MARK: - Model
 
 final class TodayModel: ObservableObject {
-    @Published private(set) var items: [Item] = Store.load() {
+    @Published private(set) var items: [Item] = Store.load().items {
+        didSet { scheduleSave() }
+    }
+    /// The one item you're working on right now (like Linear's In Progress).
+    @Published private(set) var nowId: UUID? = Store.load().now {
         didSet { scheduleSave() }
     }
     @Published var draft = ""
@@ -112,9 +118,10 @@ final class TodayModel: ObservableObject {
     var doneCount: Int { items.filter(\.done).count }
     var isFull: Bool { items.count >= Store.maxItems }
     var allDone: Bool { !items.isEmpty && doneCount == items.count }
+    var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
 
     func start() {
-        Store.save(items)  // replaces yesterday's file right away if the day has turned
+        Store.save(items, now: nowItem?.id)  // replaces yesterday's file right away if the day has turned
         scheduleReset()
         // A timer doesn't fire while the Mac sleeps, so also check on wake and clock changes.
         let ws = NSWorkspace.shared.notificationCenter
@@ -137,6 +144,7 @@ final class TodayModel: ObservableObject {
             onFinishEditing?()
             draft = ""
             items = []
+            nowId = nil
         }
         scheduleReset()
     }
@@ -154,8 +162,8 @@ final class TodayModel: ObservableObject {
     /// Writes shortly after the last change, so typing doesn't hit the disk per keystroke.
     private func scheduleSave() {
         saveWork?.cancel()
-        let snapshot = items
-        let work = DispatchWorkItem { Store.save(snapshot) }
+        let snapshot = items, now = nowId
+        let work = DispatchWorkItem { Store.save(snapshot, now: now) }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
@@ -188,13 +196,23 @@ final class TodayModel: ObservableObject {
 
     func toggle(_ id: UUID) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        withAnimation(.easeOut(duration: 0.2)) { items[i].done.toggle() }
+        withAnimation(.easeOut(duration: 0.2)) {
+            items[i].done.toggle()
+            if items[i].done, nowId == id { nowId = nil }  // finishing it ends "now"
+        }
         if allDone { celebrate() }
+    }
+
+    /// Marks an item as the one you're working on now; there's only ever one.
+    /// Tapping the current one again clears it.
+    func setNow(_ id: UUID) {
+        withAnimation(.easeOut(duration: 0.2)) { nowId = nowId == id ? nil : id }
     }
 
     func remove(_ id: UUID) {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { items.removeAll { $0.id == id } }
         if hoveredRow == id { hoveredRow = nil }
+        if nowId == id { nowId = nil }
     }
 
     func clearDone() {
@@ -410,14 +428,16 @@ struct ItemRow: View {
     @FocusState private var hasFocus: Bool
 
     private var hovered: Bool { model.hoveredRow == item.id }
+    private var isNow: Bool { model.nowId == item.id && !item.done }
     static func height(_ scale: CGFloat) -> CGFloat { 34 * scale }
     private var font: Font { Theme.font(15 * scale) }
 
     var body: some View {
         HStack(spacing: 10 * scale) {
-            Image(systemName: item.done ? "checkmark.circle" : "circle")
-                .font(.system(size: 17 * scale, weight: item.done ? .semibold : .regular))
-                .foregroundStyle(item.done ? Theme.green : hovered ? Theme.text : Theme.dim)
+            // A half-filled circle marks the one in progress, like Linear.
+            Image(systemName: item.done ? "checkmark.circle" : isNow ? "circle.lefthalf.filled" : "circle")
+                .font(.system(size: 17 * scale, weight: item.done || isNow ? .semibold : .regular))
+                .foregroundStyle(item.done || isNow ? Theme.green : hovered ? Theme.text : Theme.dim)
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
@@ -435,10 +455,22 @@ struct ItemRow: View {
                     .textFieldStyle(.plain)
                     .font(font)
                     .foregroundStyle(Theme.text)
+                    .fontWeight(isNow ? .semibold : nil)
                     .lineLimit(1)
                     .focused($hasFocus)
                     .onSubmit { finish() }
                     .onExitCommand { finish() }
+            }
+            if !item.done {
+                Image(systemName: isNow ? "pin.fill" : "pin")
+                    .font(.system(size: 11 * scale, weight: .semibold))
+                    .rotationEffect(.degrees(30))
+                    .foregroundStyle(isNow ? Theme.green : Theme.dim)
+                    .frame(width: 16 * scale, height: 16 * scale)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.setNow(item.id) }
+                    .opacity(isNow || hovered ? 1 : 0)
+                    .help(isNow ? "Stop working on this" : "Working on this now")
             }
             Image(systemName: "xmark")
                 .font(.system(size: 9 * scale, weight: .bold))
@@ -453,7 +485,8 @@ struct ItemRow: View {
         .padding(.horizontal, 6 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
-                .fill(Theme.text.opacity(hovered ? 0.06 : 0))
+                .fill(isNow ? Theme.green.opacity(Theme.choice.isLight ? 0.10 : 0.16)
+                            : Theme.text.opacity(hovered ? 0.06 : 0))
         )
         .overlay(alignment: .bottom) {
             if Theme.choice.ruled { Rectangle().fill(Theme.rule.opacity(0.6)).frame(height: 1) }
@@ -819,13 +852,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
         let total = model.items.count
-        let title = total == 0 ? "" : " \(model.doneCount)/\(total)"
-        let symbol = model.allDone ? "checklist.checked" : "checklist"
+        // While something is pinned as "now", the menu bar shows it instead of the count.
+        let now = model.nowItem.map { $0.text.count > 30 ? $0.text.prefix(29) + "…" : $0.text }
+        let title = now.map { " \($0)" } ?? (total == 0 ? "" : " \(model.doneCount)/\(total)")
+        let symbol = now != nil ? "circle.lefthalf.filled" : model.allDone ? "checklist.checked" : "checklist"
         let key = symbol + title
         guard key != statusKey else { return }
         statusKey = key
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Today list")
-        image?.isTemplate = true
+        var image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Today list")
+        if now != nil {
+            image = image?.withSymbolConfiguration(.init(paletteColors: [.systemGreen]))
+        }
+        image?.isTemplate = now == nil
         button.image = image
         button.attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
@@ -840,6 +878,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleSound() { model.soundOn.toggle() }
 
     @objc func clearDone() { model.clearDone() }
+
+    @objc func clearNow() { if let id = model.nowItem?.id { model.setNow(id) } }
 
     @objc func toggleItem(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? UUID else { return }
@@ -871,11 +911,16 @@ extension AppDelegate: NSMenuDelegate {
         menu.addItem(NSMenuItem(title: total == 0 ? "Nothing on today's list yet"
                                     : "Today · \(model.doneCount) of \(total) done",
                                 action: nil, keyEquivalent: ""))
+        if let now = model.nowItem {
+            let entry = NSMenuItem(title: "Stop Working on “\(now.text)”", action: #selector(clearNow), keyEquivalent: "")
+            entry.target = self
+            menu.addItem(entry)
+        }
         for item in model.items {
             let entry = NSMenuItem(title: item.text, action: #selector(toggleItem(_:)), keyEquivalent: "")
             entry.target = self
             entry.representedObject = item.id
-            entry.state = item.done ? .on : .off
+            entry.state = item.done ? .on : item.id == model.nowItem?.id ? .mixed : .off
             menu.addItem(entry)
         }
         menu.addItem(.separator())
@@ -927,7 +972,8 @@ extension AppDelegate: NSMenuDelegate {
 
 if CommandLine.arguments.contains("--print") {
     print("Today (\(Store.dayKey())), resets at \(Store.resetHour):00 — \(Store.url.path)")
-    for item in Store.load() { print(item.done ? "[x]" : "[ ]", item.text) }
+    let file = Store.load()
+    for item in file.items { print(item.done ? "[x]" : item.id == file.now ? "[>]" : "[ ]", item.text) }
     exit(0)
 }
 

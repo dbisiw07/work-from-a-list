@@ -15,6 +15,11 @@ the same on any wallpaper, in light or dark mode.
 - Click a circle to check an item off; done items are struck through (uncheck
   one to edit it again). Click an item's text to edit it, and hover a
   row and click × to remove it. An item you edit down to nothing is removed.
+- Hover a row and click the pin to mark it as the one you're working on now.
+  Like Linear's In Progress, its circle turns half-filled green and the row
+  is lightly tinted, and the menu bar shows that task instead of the count, so
+  you can see it from any app. Only one item can be "now": pinning another moves
+  it, and checking it off or clicking the pin again clears it.
 - The header shows the date and a ring with done/total. When the last item is
   checked off, the card glows green, says "All done ✓", and plays a soft chime.
 - At 25 items the add box is replaced by "That's 25 — plenty for one day."
