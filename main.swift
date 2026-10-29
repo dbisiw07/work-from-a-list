@@ -78,8 +78,15 @@ enum Store {
     }
 
     static func load() -> File {
-        guard let data = try? Data(contentsOf: url),
-              let file = try? JSONDecoder().decode(File.self, from: data) else { return File(day: dayKey(), items: []) }
+        (try? Data(contentsOf: url)).flatMap(file(from:)) ?? File(day: dayKey(), items: [])
+    }
+
+    /// The list in `data`, or nil if it isn't a list (say, half-written by another app).
+    static func file(from data: Data) -> File? {
+        guard var file = try? JSONDecoder().decode(File.self, from: data) else { return nil }
+        // Another app may have copied a task; every row needs its own id.
+        var seen = Set<UUID>()
+        for i in file.items.indices where !seen.insert(file.items[i].id).inserted { file.items[i].id = UUID() }
         // A list from an earlier day: unfinished tasks carry over with their urgent
         // flags; done ones and the "now" pin clear.
         guard file.day == dayKey() else { return File(day: dayKey(), items: carryOver(file.items)) }
@@ -87,6 +94,9 @@ enum Store {
         return File(day: file.day, items: Array(file.items.prefix(maxItems)),
                     now: file.now, nowSince: file.nowSince)
     }
+
+    /// What the HUD last wrote or read, so it can tell its own saves from another app's.
+    static var lastWritten: Data?
 
     /// What a new day starts with: yesterday's unfinished tasks, in order, still urgent if they were.
     static func carryOver(_ items: [Item]) -> [Item] {
@@ -96,9 +106,138 @@ enum Store {
     static func save(_ items: [Item], now: UUID?, since: Date?) {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(File(day: dayKey(), items: items, now: now, nowSince: since)).write(to: url, options: .atomic)
+            let data = try JSONEncoder().encode(File(day: dayKey(), items: items, now: now, nowSince: since))
+            lastWritten = data
+            try data.write(to: url, options: .atomic)
         } catch {
             NSLog("Today HUD: couldn't save list: \(error)")
+        }
+    }
+}
+
+/// Calls back when today.json changes on disk. Watches the folder, which sees saves
+/// that replace the file, and the file itself, which sees writes in place.
+final class FileWatcher {
+    private let url: URL
+    private let onChange: () -> Void
+    private var folder: DispatchSourceFileSystemObject?
+    private var file: DispatchSourceFileSystemObject?
+    private var pending: DispatchWorkItem?
+
+    init(url: URL, onChange: @escaping () -> Void) {
+        self.url = url
+        self.onChange = onChange
+        folder = watch(url.deletingLastPathComponent().path, [.write])
+        file = watch(url.path, [.write, .extend, .delete, .rename])
+    }
+
+    private func watch(_ path: String, _ events: DispatchSource.FileSystemEvent) -> DispatchSourceFileSystemObject? {
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return nil }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: events, queue: .main)
+        source.setEventHandler { [weak self] in self?.changed() }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        return source
+    }
+
+    private func changed() {
+        // A save swaps in a new file, so follow whichever file is there now.
+        file?.cancel()
+        file = watch(url.path, [.write, .extend, .delete, .rename])
+        // One reload per burst of writes.
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.onChange() }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+}
+
+/// The flash under the list: one of your mantras, changed with each 25-minute focus
+/// block. Edit them in ~/Library/Application Support/TodayHUD/mantras.txt, one per line.
+enum Mantras {
+    static var url: URL { Store.url.deletingLastPathComponent().appendingPathComponent("mantras.txt") }
+
+    static let starters = [
+        "Every day try some hypothesis on something",
+        "What will change for the user when it's done?",
+        "What are the core primitives?",
+        "Service to God is the main reason we are here",
+        "Write down your goals now",
+        "Know the algorithm and then apply it",
+        "Cold call and sell",
+        "Be comfortable with doing it without knowing all the details",
+        "Get clarity of everything",
+    ]
+
+    /// What the HUD last wrote or read, so it can tell its own saves from yours.
+    static var lastText: String?
+
+    /// Your mantras; blank lines and lines starting with # are skipped.
+    static func load() -> [String] {
+        if !FileManager.default.fileExists(atPath: url.path) { save(starters) }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return starters }
+        lastText = text
+        return text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    }
+
+    /// True if the file holds something the HUD didn't write.
+    static var changedOnDisk: Bool { (try? String(contentsOf: url, encoding: .utf8)) != lastText }
+
+    static func save(_ list: [String]) {
+        let lines = list.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let text = "# One mantra per line. Today HUD shows a new one with each 25-minute focus block.\n"
+            + lines.map { $0 + "\n" }.joined()
+        lastText = text
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("Today HUD: couldn't save mantras: \(error)")
+        }
+    }
+
+    /// Same blocks as Focus HUD (25 minutes from 6:00 unless you changed its settings),
+    /// so a new mantra arrives with a new block.
+    private static var schedule: (start: Int, chunk: Int) {
+        let focus = UserDefaults(suiteName: "local.focus-hud")
+        let start = focus?.object(forKey: "startHour") as? Int ?? 6
+        let minutes = focus?.object(forKey: "chunkMinutes") as? Int ?? 25
+        return (start * 3600, max(1, minutes) * 60)
+    }
+
+    private static func block(_ now: Date) -> Int {
+        let seconds = Int(now.timeIntervalSince(Calendar.current.startOfDay(for: now))) - schedule.start
+        return Int((Double(seconds) / Double(schedule.chunk)).rounded(.down))
+    }
+
+    static func nextChange(after now: Date) -> Date {
+        let start = Calendar.current.startOfDay(for: now)
+        let next = (block(now) + 1) * schedule.chunk + schedule.start
+        return start.addingTimeInterval(TimeInterval(next))
+    }
+
+    /// Which of `count` mantras this block shows. Each day gets its own shuffle,
+    /// and none repeats until all have shown.
+    static func pick(of count: Int, at now: Date = Date()) -> Int? {
+        guard count > 0 else { return nil }
+        var rng = SplitMix(seed: Store.dayKey(now).utf8.reduce(1469598103934665603) { ($0 ^ UInt64($1)) &* 1099511628211 })
+        let order = Array(0..<count).shuffled(using: &rng)
+        let n = block(now) % count
+        return order[n < 0 ? n + count : n]
+    }
+
+    /// A seeded generator, so the order stays put when the app restarts.
+    struct SplitMix: RandomNumberGenerator {
+        var seed: UInt64
+        mutating func next() -> UInt64 {
+            seed &+= 0x9E3779B97F4A7C15
+            var z = seed
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
         }
     }
 }
@@ -163,6 +302,7 @@ final class TodayModel: ObservableObject {
     var onHide: (() -> Void)?
     /// Lets the HUD take the keyboard for a click that isn't on a text field.
     var onTakeKeyboard: (() -> Void)?
+    var onManageMantras: (() -> Void)?
     var soundOn: Bool {
         get { UserDefaults.standard.object(forKey: "soundOn") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "soundOn") }
@@ -170,6 +310,39 @@ final class TodayModel: ObservableObject {
     private var day = Store.dayKey()
     private var saveWork: DispatchWorkItem?
     private var resetTimer: Timer?
+    private var watcher: FileWatcher?
+    struct Mantra: Identifiable, Equatable { let id = UUID(); var text: String }
+    @Published private(set) var mantras: [Mantra] = []
+    /// The mantra under the list, if mantras are on.
+    @Published private(set) var mantra: String?
+    private var mantraId: UUID?
+    private var mantraSave: DispatchWorkItem?
+    private var mantraTimer: Timer?
+    private var mantraWatcher: FileWatcher?
+    /// The header's words, yours to change in the Mantras window. Empty hides a line.
+    /// `**word**` makes a word heavy.
+    static let headerDefaults = [
+        "tagline": "make it delightful",
+        "subtitle": "**Urgency** and **Hardworking** is how you win",
+        "motto": "Do it by hand a few times, feel it, simplify, then build",
+    ]
+    @Published var tagline = TodayModel.headerLine("tagline") { didSet { save("tagline", tagline) } }
+    @Published var subtitle = TodayModel.headerLine("subtitle") { didSet { save("subtitle", subtitle) } }
+    @Published var motto = TodayModel.headerLine("motto") { didSet { save("motto", motto) } }
+    private static func headerLine(_ key: String) -> String {
+        UserDefaults.standard.string(forKey: key) ?? headerDefaults[key] ?? ""
+    }
+    private func save(_ key: String, _ value: String) { UserDefaults.standard.set(value, forKey: key) }
+    func resetHeader() {
+        tagline = Self.headerDefaults["tagline"]!
+        subtitle = Self.headerDefaults["subtitle"]!
+        motto = Self.headerDefaults["motto"]!
+    }
+
+    var mantrasOn: Bool {
+        get { UserDefaults.standard.object(forKey: "mantrasOn") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "mantrasOn"); showMantra() }
+    }
 
     var doneCount: Int { items.filter(\.done).count }
     var isFull: Bool { items.count >= Store.maxItems }
@@ -189,6 +362,14 @@ final class TodayModel: ObservableObject {
     func start() {
         Store.save(items, now: nowItem?.id, since: nowSince)  // replaces yesterday's file right away if the day has turned
         scheduleReset()
+        watcher = FileWatcher(url: Store.url) { [weak self] in self?.reloadIfChanged() }
+        mantras = Mantras.load().map { Mantra(text: $0) }
+        mantraWatcher = FileWatcher(url: Mantras.url) { [weak self] in
+            guard let self, Mantras.changedOnDisk else { return }  // our own save
+            self.mantras = Mantras.load().map { Mantra(text: $0) }
+            self.showMantra()
+        }
+        showMantra()
         // A timer doesn't fire while the Mac sleeps, so also check on wake and clock changes.
         let ws = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
@@ -215,7 +396,92 @@ final class TodayModel: ObservableObject {
             removed = nil
         }
         scheduleReset()
+        showMantra()
     }
+
+    /// Shows this block's mantra and wakes up for the next block.
+    func showMantra() {
+        let shown = mantras.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        let pick = mantrasOn ? Mantras.pick(of: shown.count).map { shown[$0] } : nil
+        mantraId = pick?.id
+        if pick?.text != mantra {
+            withAnimation(.easeInOut(duration: 0.6)) { mantra = pick?.text }
+        }
+        mantraTimer?.invalidate()
+        guard mantrasOn else { return }
+        let t = Timer(fire: Mantras.nextChange(after: Date()).addingTimeInterval(1), interval: 0, repeats: false) {
+            [weak self] _ in self?.showMantra()
+        }
+        t.tolerance = 10
+        RunLoop.main.add(t, forMode: .common)
+        mantraTimer = t
+    }
+
+    /// Picks up a change another app or script made to today.json.
+    func reloadIfChanged() {
+        guard let data = try? Data(contentsOf: Store.url), data != Store.lastWritten else { return }  // gone, or our own save
+        guard var file = Store.file(from: data) else {
+            // Half-written: the rest is likely on its way. If it's still broken in a
+            // second, put back the list the HUD has, so a restart doesn't start empty.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, let now = try? Data(contentsOf: Store.url), Store.file(from: now) == nil else { return }
+                Store.save(self.items, now: self.nowItem?.id, since: self.nowSince)
+            }
+            return
+        }
+        Store.lastWritten = data
+        // Keep what you're typing into a task; take everything else from the file.
+        if editing {
+            var typed: [UUID: String] = [:]
+            for item in items { typed[item.id] = item.text }
+            for i in file.items.indices { file.items[i].text = typed[file.items[i].id] ?? file.items[i].text }
+        }
+        day = Store.dayKey()
+        undoWork?.cancel()
+        removed = nil
+        let since = file.now == nowId ? nowSince : nil
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            nowId = file.now
+            nowSince = file.now == nil ? nil : file.nowSince ?? since ?? Date()
+            items = file.items
+        }
+    }
+
+    // Managing mantras. Adding or removing one doesn't swap out the one on show.
+
+    func addMantra(_ text: String) {
+        let text = Self.oneLine(text).trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        mantras.append(Mantra(text: text))
+        mantrasChanged()
+    }
+
+    func setMantra(_ id: UUID, _ text: String) {
+        guard let i = mantras.firstIndex(where: { $0.id == id }) else { return }
+        mantras[i].text = Self.oneLine(text)
+        mantrasChanged()
+    }
+
+    func deleteMantra(_ id: UUID) {
+        mantras.removeAll { $0.id == id }
+        mantrasChanged()
+    }
+
+    private func mantrasChanged() {
+        if let id = mantraId, let m = mantras.first(where: { $0.id == id }),
+           !m.text.trimmingCharacters(in: .whitespaces).isEmpty {
+            mantra = m.text  // you edited the one on show
+        } else {
+            showMantra()
+        }
+        mantraSave?.cancel()
+        let list = mantras.map(\.text)
+        let work = DispatchWorkItem { Mantras.save(list) }
+        mantraSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    func flushMantras() { mantraSave?.perform(); mantraSave = nil }
 
     private func scheduleReset() {
         resetTimer?.invalidate()
@@ -489,6 +755,22 @@ struct TodayView: View {
                         .padding(.leading, 29 * s)
                 }
             }
+            if let mantra = model.mantra {
+                HStack(alignment: .firstTextBaseline, spacing: 6 * s) {
+                    Text("✦").foregroundStyle(Theme.dim)
+                    Text(mantra).foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(Theme.font(12 * s))
+                .padding(.horizontal, 6 * s)
+                .padding(.top, 10 * s)
+                .id(mantra)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6 * s)),
+                                        removal: .opacity))
+                .contentShape(Rectangle())
+                .onTapGesture { model.onManageMantras?() }
+                .help("A new one with each 25-minute focus block. Click to edit your mantras and header.")
+            }
         }
         .padding(16 * s)
         .frame(width: model.width * s, alignment: .leading)
@@ -534,6 +816,15 @@ struct TodayView: View {
         .background(FrameReporter { if model.items.count <= Store.visibleRows { model.listRect = $0 } })
     }
 
+    private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespaces) }
+
+    /// Text where `**word**` is heavy, e.g. "**Urgency** and **Hardworking** is how you win".
+    static func marked(_ text: String) -> Text {
+        text.components(separatedBy: "**").enumerated().reduce(Text("")) { line, part in
+            line + (part.offset.isMultiple(of: 2) ? Text(part.element) : Text(part.element).fontWeight(.heavy))
+        }
+    }
+
     private var header: some View {
         HStack(alignment: .center, spacing: 10 * s) {
             VStack(alignment: .leading, spacing: 5 * s) {
@@ -542,17 +833,26 @@ struct TodayView: View {
                         Text("All done ✓").foregroundColor(Theme.green)
                     } else {
                         Text("Today").foregroundColor(Theme.text)
-                            + Text(" – make it delightful").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+                            + Text(trimmed(model.tagline).isEmpty ? "" : " – " + trimmed(model.tagline))
+                                .font(Theme.font(22 * s)).foregroundColor(Theme.dim)
                     }
                 }
                 .font(Theme.font(22 * s, bold: true))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                (Text("Urgency").fontWeight(.heavy) + Text(" and ") + Text("Hardworking").fontWeight(.heavy)
-                    + Text(" is how you win"))
-                    .font(Theme.font(12 * s))
-                    .foregroundStyle(Theme.green)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !trimmed(model.subtitle).isEmpty {
+                    Self.marked(trimmed(model.subtitle))
+                        .font(Theme.font(12 * s))
+                        .foregroundStyle(Theme.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !trimmed(model.motto).isEmpty {
+                    Self.marked(trimmed(model.motto))
+                        .font(Theme.font(12 * s))
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 5 * s)
+                }
             }
             Spacer(minLength: 0)
             // Always takes its space, so the header doesn't reflow when you hover.
@@ -780,6 +1080,74 @@ struct UndoRow: View {
 }
 
 /// The next empty line of the list.
+/// The Mantras window: add, edit and delete. Changes save to mantras.txt as you type.
+struct MantraManager: View {
+    @ObservedObject var model: TodayModel
+    @State private var draft = ""
+    @FocusState private var adding: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Form {
+                Section {
+                    TextField("Today –", text: $model.tagline, prompt: Text("make it delightful"))
+                    TextField("Subtitle", text: $model.subtitle, prompt: Text("Hidden when empty"))
+                    TextField("Motto", text: $model.motto, prompt: Text("Hidden when empty"))
+                } header: {
+                    HStack {
+                        Text("Header")
+                        Spacer()
+                        Button("Reset") { model.resetHeader() }.buttonStyle(.link).font(.caption)
+                    }
+                } footer: {
+                    Text("Put **two stars** around a word to make it bold.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            .fixedSize(horizontal: false, vertical: true)
+            Text("Mantras").font(.headline).padding(.horizontal, 20)
+            Text("A new one shows under your list with each 25-minute focus block.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
+            List {
+                ForEach(model.mantras) { m in
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkle")
+                            .foregroundStyle(m.text == model.mantra ? Color.green : Color.secondary.opacity(0.4))
+                            .help(m.text == model.mantra ? "Showing now" : "")
+                        TextField("Mantra", text: Binding(get: { m.text }, set: { model.setMantra(m.id, $0) }))
+                            .textFieldStyle(.plain)
+                        Button { model.deleteMantra(m.id) } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("Delete")
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            .listStyle(.inset)
+            HStack(spacing: 8) {
+                Image(systemName: "plus").foregroundStyle(.secondary)
+                TextField("New mantra, then Return", text: $draft)
+                    .textFieldStyle(.plain)
+                    .focused($adding)
+                    .onSubmit {
+                        model.addMantra(draft)
+                        draft = ""
+                        adding = true
+                    }
+            }
+            .padding(16)
+        }
+        .frame(minWidth: 380, minHeight: 480)
+        .onDisappear { model.flushMantras() }
+    }
+}
+
 struct AddField: View {
     @ObservedObject var model: TodayModel
     let scale: CGFloat
@@ -1137,6 +1505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.userHidden = true
             self?.updateVisibility()
         }
+        model.onManageMantras = { [weak self] in self?.manageMantras() }
         model.onTakeKeyboard = { [weak self] in
             self?.panel.allowKey = true
             self?.panel.makeKey()
@@ -1189,6 +1558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model.flushSave()
+        model.flushMantras()
     }
 
     private func saveFrame() {
@@ -1281,6 +1651,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleSound() { model.soundOn.toggle() }
 
+    @objc func toggleMantras() { model.mantrasOn.toggle() }
+
+    private var mantraWindow: NSWindow?
+
+    @objc func manageMantras() {
+        if mantraWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 640),
+                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.title = "Mantras & Header"
+            w.isReleasedWhenClosed = false
+            w.minSize = NSSize(width: 380, height: 480)
+            w.contentView = NSHostingView(rootView: MantraManager(model: model))
+            w.center()
+            mantraWindow = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        mantraWindow?.makeKeyAndOrderFront(nil)
+    }
+
     @objc func clearDone() { model.clearDone() }
 
     @objc func clearNow() { if let id = model.nowItem?.id { model.setNow(id) } }
@@ -1366,6 +1755,8 @@ extension AppDelegate: NSMenuDelegate {
 
         if model.doneCount > 0 { add("Clear Completed", #selector(clearDone)) }
         add("Chime When All Done", #selector(toggleSound), checked: model.soundOn)
+        add("Show Mantras", #selector(toggleMantras), checked: model.mantrasOn)
+        add("Mantras & Header…", #selector(manageMantras))
         add("Reset HUD Position", #selector(resetPosition))
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
@@ -1375,6 +1766,70 @@ extension AppDelegate: NSMenuDelegate {
 }
 
 // MARK: - Entry
+
+/// `--test`: checks the logic that's easy to break, with no window and without
+/// touching your list. Exits 1 if anything fails.
+if CommandLine.arguments.contains("--test") {
+    var failures = 0
+    func check(_ ok: Bool, _ what: String, line: Int = #line) {
+        if !ok { failures += 1; print("FAIL (line \(line)): \(what)") }
+    }
+    let cal = Calendar.current
+    func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int = 0) -> Date {
+        cal.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+    let reset = max(1, Store.resetHour)  // whatever you've set; 5 by default
+
+    // The day turns at the reset hour, not at midnight, daylight saving days included.
+    check(Store.dayKey(date(2026, 3, 10, reset - 1)) == "2026-03-09", "before the reset it's still yesterday")
+    check(Store.dayKey(date(2026, 3, 10, reset)) == "2026-03-10", "at the reset it's today")
+    check(Store.dayKey(date(2026, 3, 8, 23)) == "2026-03-08", "late evening is today")
+    check(Store.dayKey(date(2026, 11, 1, reset)) == "2026-11-01", "reset on a daylight saving day")
+    let next = Store.nextReset(after: date(2026, 3, 10, 14))
+    check(cal.component(.hour, from: next) == reset && cal.component(.day, from: next) == 11, "next reset is tomorrow morning")
+
+    // Carry-over keeps unfinished tasks, in order, urgent flags and all.
+    var a = Item(text: "a"); a.urgent = true
+    var b = Item(text: "b"); b.done = true
+    let c = Item(text: "c")
+    check(Store.carryOver([a, b, c]).map(\.text) == ["a", "c"], "done tasks clear, open ones stay in order")
+    check(Store.carryOver([a]).first?.urgent == true, "urgent carries over")
+    check(Store.carryOver(Array(repeating: c, count: 40)).count == Store.maxItems, "carry-over caps at maxItems")
+
+    // Reading files written by other apps.
+    let today = Store.dayKey()
+    let json = { (s: String) in Store.file(from: Data(s.utf8)) }
+    check(json(#"{"day":"\#(today)","items":[{"te"#) == nil, "half-written file is rejected")
+    let minimal = json(#"{"day":"\#(today)","items":[{"text":"x"},{"text":"y","done":true}]}"#)
+    check(minimal?.items.map(\.text) == ["x", "y"] && minimal?.items[1].done == true, "items without ids or flags load")
+    let id = UUID().uuidString
+    let dupes = json(#"{"day":"\#(today)","items":[{"id":"\#(id)","text":"x"},{"id":"\#(id)","text":"y"}]}"#)
+    check(Set(dupes?.items.map(\.id) ?? []).count == 2, "duplicate ids are made unique")
+    let stale = json(#"{"day":"2001-01-01","now":"\#(id)","items":[{"id":"\#(id)","text":"x"},{"text":"y","done":true}]}"#)
+    check(stale?.day == today && stale?.items.map(\.text) == ["x"] && stale?.now == nil, "an old day's file gets the morning reset")
+
+    // Mantras: every one shows before any repeats, and the order holds all day.
+    for count in [1, 2, 9, 10] {
+        let start = date(2026, 3, 10, 6)
+        let picks = (0..<count).compactMap { Mantras.pick(of: count, at: start.addingTimeInterval(Double($0) * 25 * 60)) }
+        check(Set(picks).count == count, "\(count) mantras: no repeats within a round")
+    }
+    let noon = date(2026, 3, 10, 12, 5)
+    check(Mantras.pick(of: 9, at: noon) == Mantras.pick(of: 9, at: noon.addingTimeInterval(60)), "same block, same mantra")
+    check(Mantras.pick(of: 0) == nil, "no mantras, nothing shown")
+    check(Mantras.pick(of: 5, at: date(2026, 3, 10, 2)) != nil, "before the first block still shows one")
+    check(Mantras.nextChange(after: date(2026, 3, 10, 9, 31)) > date(2026, 3, 10, 9, 31), "the next change is in the future")
+
+    // Small formatting.
+    let t0 = date(2026, 3, 10, 9)
+    check(ItemRow.elapsed(from: t0, to: t0.addingTimeInterval(30)) == "0m", "under a minute is 0m")
+    check(ItemRow.elapsed(from: t0, to: t0.addingTimeInterval(65 * 60)) == "1h 5m", "1h 5m")
+    check(ItemRow.elapsed(from: t0, to: t0.addingTimeInterval(120 * 60)) == "2h", "2h")
+    check(TodayModel.oneLine("a\nb") == "a b", "pasted line breaks become spaces")
+
+    print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
+    exit(failures == 0 ? 0 : 1)
+}
 
 if CommandLine.arguments.contains("--print") {
     print("Today (\(Store.dayKey())), resets at \(Store.resetHour):00 — \(Store.url.path)")

@@ -9,6 +9,25 @@ blue lines under each task, and a red margin. Right-click → Color, or menu bar
 card with white text. Every theme is opaque, so the list stands out and reads
 the same on any wallpaper, in light or dark mode.
 
+## Install
+
+You need macOS 13 (Ventura) or later, on Apple silicon or Intel. Paste this into
+Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dbisiw07/today-hud/main/get.sh | sh
+```
+
+That downloads the latest release into `~/Applications` and starts it. It also
+starts at login and comes back if it ever crashes; choosing Quit keeps it closed
+until your next login. Run the same line again to update. To remove it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dbisiw07/today-hud/main/uninstall.sh | sh
+```
+
+Your list and mantras stay unless you add `-s -- --all` after `sh`.
+
 ## Using it
 
 - **Add:** click the add line ("Think, Break it down, Sweat the details and edges"), type a
@@ -45,6 +64,19 @@ the same on any wallpaper, in light or dark mode.
 Past 10 tasks the list scrolls inside the card instead of growing down the
 screen. At 25 the add line says "That's 25 — plenty for one day."
 
+## Mantras and header
+
+Under the list a quiet ✦ line shows one of your mantras. It changes every 25
+minutes, counted from 6:00, and none repeats until all have shown; each day
+gets a new order. Click it, or choose
+menu bar → Mantras & Header…, to add, edit and delete mantras. They're kept in
+`~/Library/Application Support/TodayHUD/mantras.txt`, one per line, and editing that
+file works too. Menu bar → Show Mantras turns the line off.
+
+The same window changes the header: the words after "Today –", the green
+subtitle and the gray motto under it. Put `**two stars**` around a word to make
+it bold, and leave a line empty to hide it.
+
 ## Each morning
 
 The list is saved in `~/Library/Application Support/TodayHUD/today.json`.
@@ -55,34 +87,48 @@ to start on.
 Until 5 am a list you make after midnight still counts as today's. To change the reset hour, run
 `defaults write local.today-hud resetHour -int 5` and restart the app.
 
+## Changing the list from other apps
+
+The HUD watches `today.json`, so a script, a Shortcut or anything else that
+writes the file shows up in the HUD and the menu bar within a moment. Write the
+same JSON the HUD writes: `{"day": "2026-10-29", "items": [{"text": "…"}]}`.
+Each item can also have `"done"` and `"urgent"` (true/false) and an `"id"`;
+leave the id out for a new task and the HUD adds one. `"now"` is the id of the
+pinned task. A file from an earlier day gets the morning reset, and a
+half-written file is ignored until it's complete (or put back from the HUD's
+copy if it stays broken). While you're typing in a task, your text wins and
+everything else comes from the file.
+
 ## How it stays light
 
 There's no ticking timer. The app sleeps until you touch the list. One timer
-fires at the morning reset, and it also rechecks the day on wake, unlock and
+fires at the morning reset and one when the mantra changes. It also rechecks the day on wake, unlock and
 clock changes. Saves are written half a second after your last change, not on
 every keystroke. It sits at ~0% CPU and ~20 MB of memory.
 
 The HUD only takes the keyboard while you're typing in it, never on its own.
 
-## Install
+## Build it yourself
 
-You need macOS 13 (Ventura) or later, on Apple silicon or Intel, and Apple's
-command line tools for the Swift compiler. If `swiftc --version` doesn't work,
-run `xcode-select --install` first.
-
-```sh
-git clone <this repo> today-hud && cd today-hud
-./install.sh
-```
-
-`install.sh` builds the app on your Mac, copies it to `~/Applications`, and
-registers a LaunchAgent (`local.today-hud`), so the HUD starts at login and
-comes back if it ever crashes. Choosing Quit keeps it closed until your next
-login. Only one copy ever runs. Run `install.sh` again after pulling changes.
+You need Apple's command line tools for the Swift compiler. If
+`swiftc --version` doesn't work, run `xcode-select --install` first.
 
 ```sh
-./uninstall.sh   # stop it and remove the app and LaunchAgent
+git clone https://github.com/dbisiw07/today-hud && cd today-hud
+./install.sh     # build, install to ~/Applications and start
 ./build.sh       # just build "Today HUD.app" in this folder
+./uninstall.sh   # stop it and remove the app and LaunchAgent
 ```
 
-`"Today HUD.app/Contents/MacOS/TodayHUD" --print` prints today's list.
+`"Today HUD.app/Contents/MacOS/TodayHUD" --print` prints today's list, and
+`--test` runs the checks.
+
+## Contributing
+
+Issues, ideas and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+[AGENTS.md](AGENTS.md) explains how the code fits together, for people and AI
+coding agents alike.
+
+## License
+
+[MIT](LICENSE)

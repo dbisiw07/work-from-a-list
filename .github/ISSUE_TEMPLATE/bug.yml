@@ -1,0 +1,19 @@
+name: Bug
+description: Something doesn't work the way it should.
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to make it happen
+      placeholder: "1. Add a task\n2. Drag it to the top\n3. …"
+  - type: input
+    attributes:
+      label: macOS version and Mac
+      placeholder: "macOS 15.1, MacBook Air M2"
+    validations:
+      required: true
