@@ -482,7 +482,7 @@ struct TodayView: View {
                 .minimumScaleFactor(0.7)
                 Text("Urgency and Hardworking is how you win the competitions")
                     .font(Theme.font(12 * s))
-                    .foregroundStyle(Theme.dim)
+                    .foregroundStyle(Theme.green)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
