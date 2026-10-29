@@ -66,7 +66,10 @@ enum Store {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data),
               file.day == dayKey() else { return File(day: dayKey(), items: []) }
-        return File(day: file.day, items: Array(file.items.prefix(maxItems)), now: file.now, nowSince: file.nowSince)
+        // Open tasks first, done ones after, each keeping its order.
+        let items = Array(file.items.prefix(maxItems))
+        return File(day: file.day, items: items.filter { !$0.done } + items.filter(\.done),
+                    now: file.now, nowSince: file.nowSince)
     }
 
     static func save(_ items: [Item], now: UUID?, since: Date?) {
