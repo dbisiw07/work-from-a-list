@@ -835,11 +835,11 @@ struct AddField: View {
         model.onFinishEditing?()
     }
 
-    /// The three verbs carry the weight, "Sweat" most of all.
+    /// The three verbs carry the weight, equally.
     private var hint: Text {
         if model.items.isEmpty { return Text("What matters today?") }
-        return Text("Think").fontWeight(.bold) + Text(", ") + Text("Break").fontWeight(.bold)
-            + Text(" it down, ") + Text("Sweat").fontWeight(.black) + Text(" the details and edges")
+        return Text("Think").fontWeight(.heavy) + Text(", ") + Text("Break").fontWeight(.heavy)
+            + Text(" it down, ") + Text("Sweat").fontWeight(.heavy) + Text(" the details and edges")
     }
 }
 
