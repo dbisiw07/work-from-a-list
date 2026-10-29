@@ -671,10 +671,9 @@ struct ItemRow: View {
         }
     }
 
-    /// "<1m", "40m", "1h 5m".
+    /// "0m", "40m", "1h 5m".
     static func elapsed(from start: Date, to now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
-        if minutes < 1 { return "<1m" }
         if minutes < 60 { return "\(minutes)m" }
         return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
     }
