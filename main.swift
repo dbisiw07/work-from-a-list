@@ -803,29 +803,20 @@ struct AddField: View {
                 .help("Add")
                 .accessibilityLabel("Add")
                 .accessibilityAddTraits(.isButton)
-            // The hint is drawn here rather than as the field's placeholder, which
-            // drops bold text on macOS.
-            ZStack(alignment: .leading) {
-                if model.draft.isEmpty {
-                    hint
-                        .font(Theme.font(15 * scale))
-                        .foregroundColor(Theme.faint)
-                        .lineLimit(1)
-                        .allowsHitTesting(false)
+            TextField("", text: $model.draft,
+                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, Break it down, Sweat the details and edges")
+                          .foregroundColor(Theme.faint))
+                .textFieldStyle(.plain)
+                .font(Theme.font(15 * scale))
+                .foregroundStyle(Theme.text)
+                .focused($hasFocus)
+                // Return adds and keeps the line ready for the next item.
+                .onSubmit {
+                    if model.draft.trimmingCharacters(in: .whitespaces).isEmpty { return done() }
+                    model.add()
+                    if model.isFull { done() }
                 }
-                TextField("", text: $model.draft)
-                    .textFieldStyle(.plain)
-                    .font(Theme.font(15 * scale))
-                    .foregroundStyle(Theme.text)
-                    .focused($hasFocus)
-                    // Return adds and keeps the line ready for the next item.
-                    .onSubmit {
-                        if model.draft.trimmingCharacters(in: .whitespaces).isEmpty { return done() }
-                        model.add()
-                        if model.isFull { done() }
-                    }
-                    .onExitCommand { done() }
-            }
+                .onExitCommand { done() }
         }
         .padding(.vertical, 7 * scale)
         .padding(.horizontal, 6 * scale)
@@ -841,13 +832,6 @@ struct AddField: View {
     private func done() {
         hasFocus = false
         model.onFinishEditing?()
-    }
-
-    /// The three verbs carry the weight, equally.
-    private var hint: Text {
-        if model.items.isEmpty { return Text("What matters today?") }
-        return Text("Think").fontWeight(.heavy) + Text(", ") + Text("Break").fontWeight(.heavy)
-            + Text(" it down, ") + Text("Sweat").fontWeight(.heavy) + Text(" the details and edges")
     }
 }
 
