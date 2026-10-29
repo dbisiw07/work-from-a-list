@@ -474,13 +474,15 @@ struct TodayView: View {
                         Text("All done ✓").foregroundColor(Theme.green)
                     } else {
                         Text("Today").foregroundColor(Theme.text)
-                            + Text(" – make it delightful").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+                            + Text(" – make it ").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+                            + Text("delightful").foregroundColor(Theme.dim)
                     }
                 }
                 .font(Theme.font(22 * s, bold: true))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                Text("Urgency and Hardworking is how you win the competitions")
+                (Text("Urgency").fontWeight(.heavy) + Text(" and ") + Text("Hardworking").fontWeight(.heavy)
+                    + Text(" is how you win the competitions"))
                     .font(Theme.font(12 * s))
                     .foregroundStyle(Theme.green)
                     .fixedSize(horizontal: false, vertical: true)
