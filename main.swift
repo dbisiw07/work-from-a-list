@@ -481,7 +481,7 @@ struct TodayView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 (Text("Urgency").fontWeight(.heavy) + Text(" and ") + Text("Hardworking").fontWeight(.heavy)
-                    + Text(" is how you win the competitions"))
+                    + Text(" is how you win"))
                     .font(Theme.font(12 * s))
                     .foregroundStyle(Theme.green)
                     .fixedSize(horizontal: false, vertical: true)
