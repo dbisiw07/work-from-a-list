@@ -469,23 +469,33 @@ struct TodayView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 10 * s) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(model.allDone ? "All done ✓" : "Today")
-                    .font(Theme.font(22 * s, bold: true))
-                    .foregroundStyle(model.allDone ? Theme.green : Theme.text)
-                Text(Store.day().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                Group {
+                    if model.allDone {
+                        Text("All done ✓").foregroundColor(Theme.green)
+                    } else {
+                        Text("Today").foregroundColor(Theme.text)
+                            + Text(" – make it delightful").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+                    }
+                }
+                .font(Theme.font(22 * s, bold: true))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                Text("Urgency and Hardworking is how you win the competitions")
                     .font(Theme.font(12 * s))
                     .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            if model.hover {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 15 * s))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Theme.text)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.onHide?() }
-                    .help("Hide HUD — stays in the menu bar (⌃⌥T brings it back)")
-            }
+            // Always takes its space, so the header doesn't reflow when you hover.
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 15 * s))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Theme.text)
+                .contentShape(Rectangle())
+                .onTapGesture { model.onHide?() }
+                .help("Hide HUD — stays in the menu bar (⌃⌥T brings it back)")
+                .opacity(model.hover ? 1 : 0)
+                .allowsHitTesting(model.hover)
             progress
         }
         .padding(.horizontal, 2 * s)
@@ -691,7 +701,7 @@ struct AddField: View {
                 .accessibilityLabel("Add")
                 .accessibilityAddTraits(.isButton)
             TextField("", text: $model.draft,
-                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, break it down, sweat the details")
+                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, Break it down, Sweat the details and edges")
                           .foregroundColor(Theme.faint))
                 .textFieldStyle(.plain)
                 .font(Theme.font(15 * scale))

@@ -11,7 +11,7 @@ the same on any wallpaper, in light or dark mode.
 
 ## Using it
 
-- **Add:** click the add line ("Think, break it down, sweat the details"), type a
+- **Add:** click the add line ("Think, Break it down, Sweat the details and edges"), type a
   task and press Return. The line stays ready for the next one. Press Return on
   an empty line, or Esc, and the keyboard goes back to the app you were in.
   Clicking the + also adds what you've typed.
