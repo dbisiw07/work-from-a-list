@@ -499,7 +499,7 @@ struct TodayView: View {
                 .allowsHitTesting(model.hover)
             progress
         }
-        .padding(.horizontal, 2 * s)
+        .padding(.horizontal, 6 * s)  // lines up with the rows' circles and × buttons
         .padding(.bottom, 6 * s)
     }
 
