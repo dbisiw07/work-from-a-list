@@ -99,6 +99,24 @@ to start on.
 Until 5 am a list you make after midnight still counts as today's. To change the reset hour, run
 `defaults write io.github.dbisiw07.work-from-a-list resetHour -int 5` and restart the app.
 
+## From the terminal
+
+The install adds a `today` command, so your list works from any terminal,
+including over SSH from your phone:
+
+```sh
+today                  # show the list, numbered
+today add Call the bank
+today add -u Pay rent  # urgent
+today done 2           # check off task 2 (again to reopen)
+today now 1            # pin task 1 as the one you're on
+today urgent 3         # flag or unflag task 3
+today rm 4             # remove task 4
+```
+
+Changes show up in the HUD within a moment. After each change the list prints
+again, because numbers shift as tasks move (done ones sink, urgent ones rise).
+
 ## Changing the list from other apps
 
 The HUD watches `today.json`, so a script, a Shortcut or anything else that

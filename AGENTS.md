@@ -34,7 +34,8 @@ add a check next to the others at the bottom of `main.swift`.
 | `Model` | `TodayModel`: the list, the "now" pin, urgent, undo, drag order, header text, mantras. Views never change state directly |
 | `Views` | `TodayView` (the card), `ItemRow`, `UndoRow`, `AddField`, `MantraManager` (the Mantras & Header window), `Theme` |
 | `Panel & app` | `HUDPanel` (never-focused floating panel; holds clicks on rows to tell a click from a drag), `HUDHostingView` (move, resize), `AppDelegate` (menu bar, hotkey, wake/screen changes) |
-| `Entry` | `--test`, `--print`, single instance, launch |
+| `Command line` | `CLI`: the `today` command; `perform` is pure (no disk) so `--test` checks it |
+| `Entry` | `--test`, the CLI or the HUD, single instance, launch |
 
 ## Rules the app depends on
 
