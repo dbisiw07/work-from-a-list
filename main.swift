@@ -1,6 +1,6 @@
 // Today HUD — a floating list of what you're working on today (up to 25 items).
 //
-// Each morning (6 am by default, matching the focus blocks) done tasks clear
+// Each morning (5 am by default, before an early start) done tasks clear
 // and unfinished ones carry over, urgent flags included. There is no ticking timer: the
 // app sleeps until you touch the list, plus one wake-up a day for the reset.
 
@@ -30,7 +30,7 @@ struct Item: Codable, Identifiable, Equatable {
     }
 }
 
-/// Override the reset time with `defaults write local.today-hud resetHour -int 6`.
+/// Override the reset time with `defaults write local.today-hud resetHour -int 5`.
 enum Store {
     static let maxItems = 25
     /// Urgent only means something if it's rare, so only a few at once (a WIP limit).
@@ -40,7 +40,7 @@ enum Store {
 
     static var resetHour: Int {
         let d = UserDefaults.standard
-        return d.object(forKey: "resetHour") == nil ? 6 : d.integer(forKey: "resetHour")
+        return d.object(forKey: "resetHour") == nil ? 5 : d.integer(forKey: "resetHour")
     }
 
     /// Today's list: ~/Library/Application Support/TodayHUD/today.json
