@@ -474,8 +474,7 @@ struct TodayView: View {
                         Text("All done ✓").foregroundColor(Theme.green)
                     } else {
                         Text("Today").foregroundColor(Theme.text)
-                            + Text(" – make it ").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
-                            + Text("delightful").foregroundColor(Theme.dim)
+                            + Text(" – make it delightful").font(Theme.font(22 * s)).foregroundColor(Theme.dim)
                     }
                 }
                 .font(Theme.font(22 * s, bold: true))
