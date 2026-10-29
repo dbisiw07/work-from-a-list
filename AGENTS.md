@@ -4,6 +4,14 @@ Work from a List is a floating macOS to-do list for one day. It's one Swift file
 (`main.swift`, AppKit + SwiftUI, no packages, no Xcode project) built with `swiftc`.
 These notes are for anyone changing the code, people and AI coding agents alike.
 
+## How changes land
+
+The app is public and people install `main` directly, so `main` must always work.
+Never commit to `main`. Make a branch, open a pull request, and merge only after
+CI passes and the change was tried in the real app. Keep each pull request to
+one change, and keep saved files compatible (an older or newer version must
+still read them).
+
 ## Build and check
 
 ```sh
