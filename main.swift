@@ -667,7 +667,7 @@ struct AddField: View {
                 }
                 .help("Add")
             TextField("", text: $model.draft,
-                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, break it down")
+                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, break it down, sweat the details")
                           .foregroundColor(Theme.faint))
                 .textFieldStyle(.plain)
                 .font(Theme.font(15 * scale))
