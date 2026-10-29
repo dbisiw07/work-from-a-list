@@ -15,6 +15,9 @@ the same on any wallpaper, in light or dark mode.
 - Click a circle to check an item off; done items are struck through (uncheck
   one to edit it again). Click an item's text to edit it, and hover a
   row and click × to remove it. An item you edit down to nothing is removed.
+- Drag a task up or down to reorder it; the others slide out of the way. A
+  plain click still edits the text or checks it off, and dragging the header
+  moves the whole HUD.
 - Hover a row and click the pin to mark it as the one you're working on now.
   Like Linear's In Progress, its circle turns half-filled gray and a green pin stays on the row,
   and the menu bar shows that task instead of the count, so

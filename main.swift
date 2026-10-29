@@ -105,6 +105,11 @@ final class TodayModel: ObservableObject {
     }
     /// Where the resize grip is, in the hosting view's top-left coordinates.
     var gripRect: CGRect = .zero
+    /// Where each row and the visible list are, same coordinates; used to drag rows.
+    var rowFrames: [UUID: CGRect] = [:]
+    var listRect: CGRect = .zero
+    /// The row being dragged to a new place.
+    @Published var draggingId: UUID?
     var onFinishEditing: (() -> Void)?
     var onHide: (() -> Void)?
     var soundOn: Bool {
@@ -201,6 +206,21 @@ final class TodayModel: ObservableObject {
             if items[i].done, nowId == id { nowId = nil }  // finishing it ends "now"
         }
         if allDone { celebrate() }
+    }
+
+    func row(at point: CGPoint) -> UUID? {
+        guard listRect.contains(point) else { return nil }
+        return items.first { rowFrames[$0.id]?.contains(point) == true }?.id
+    }
+
+    /// Moves the dragged item into the slot of the row under the cursor.
+    func drag(to point: CGPoint) {
+        guard let id = draggingId, let from = items.firstIndex(where: { $0.id == id }),
+              let target = row(at: point), target != id,
+              let to = items.firstIndex(where: { $0.id == target }) else { return }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            items.insert(items.remove(at: from), at: to)
+        }
     }
 
     /// Marks an item as the one you're working on now; there's only ever one.
@@ -314,6 +334,8 @@ struct TodayView: View {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: true) { rows }
                             .frame(height: CGFloat(Store.visibleRows) * ItemRow.height(s))
+                            // Only the rows in view can be dropped on.
+                            .background(FrameReporter { model.listRect = $0 })
                             // A newly added item scrolls into view.
                             .onChange(of: model.items.count) { _ in
                                 if let last = model.items.last?.id { proxy.scrollTo(last, anchor: .bottom) }
@@ -375,6 +397,8 @@ struct TodayView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        // Inside the scroll view the content runs past what's visible; that one reports instead.
+        .background(FrameReporter { if model.items.count <= Store.visibleRows { model.listRect = $0 } })
     }
 
     private var header: some View {
@@ -432,6 +456,7 @@ struct ItemRow: View {
 
     private var hovered: Bool { model.hoveredRow == item.id }
     private var isNow: Bool { model.nowId == item.id && !item.done }
+    private var dragging: Bool { model.draggingId == item.id }
     static func height(_ scale: CGFloat) -> CGFloat { 34 * scale }
     private var font: Font { Theme.font(15 * scale) }
 
@@ -487,11 +512,16 @@ struct ItemRow: View {
         .padding(.horizontal, 6 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
-                .fill(Theme.text.opacity(hovered ? 0.06 : 0))
+                .fill(dragging ? AnyShapeStyle(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom))
+                               : AnyShapeStyle(Theme.text.opacity(hovered ? 0.06 : 0)))
         )
         .overlay(alignment: .bottom) {
             if Theme.choice.ruled { Rectangle().fill(Theme.rule.opacity(0.6)).frame(height: 1) }
         }
+        .scaleEffect(dragging ? 1.02 : 1)
+        .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6 * scale, y: 2 * scale)
+        .zIndex(dragging ? 1 : 0)
+        .background(FrameReporter { model.rowFrames[item.id] = $0 })
         .onHover { inside in
             if inside { model.hoveredRow = item.id } else if hovered { model.hoveredRow = nil }
         }
@@ -547,6 +577,18 @@ struct AddField: View {
     private func done() {
         hasFocus = false
         model.onFinishEditing?()
+    }
+}
+
+/// Reports a view's frame in the hosting view's top-left coordinates.
+struct FrameReporter: View {
+    let report: (CGRect) -> Void
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { report(geo.frame(in: .global)) }
+                .onChange(of: geo.frame(in: .global)) { report($0) }
+        }
     }
 }
 
@@ -622,16 +664,73 @@ final class HUDPanel: NSPanel {
     var allowKey = false
     override var canBecomeKey: Bool { allowKey }
 
+    /// Row dragging, in the hosting view's top-left coordinates.
+    var rowAt: ((CGPoint) -> UUID?)?
+    var onRowDragBegan: ((UUID) -> Void)?
+    var onRowDragged: ((CGPoint) -> Void)?
+    var onRowDragEnded: (() -> Void)?
+    private var pendingRow: (event: NSEvent, id: UUID)?
+    private var draggingRow = false
+
+    // A press on a row is held back until we know what it is: a drag moves the
+    // row, a click is replayed so it edits the text or checks the item off.
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            // Selecting text in the field you're typing in stays a text drag.
+            if let id = rowAt?(point(event)), !(isKeyWindow && hitsFieldEditor(event)) {
+                pendingRow = (event, id)
+                draggingRow = false
+                return
+            }
+            press(event)
+        case .leftMouseDragged where pendingRow != nil:
+            guard let pending = pendingRow else { return }
+            let a = pending.event.locationInWindow, b = event.locationInWindow
+            if !draggingRow, hypot(b.x - a.x, b.y - a.y) >= 4 {
+                draggingRow = true
+                NSCursor.closedHand.push()
+                onRowDragBegan?(pending.id)
+            }
+            if draggingRow { onRowDragged?(point(event)) }
+        case .leftMouseUp where pendingRow != nil:
+            guard let pending = pendingRow else { return }
+            pendingRow = nil
+            if draggingRow {
+                draggingRow = false
+                NSCursor.pop()
+                onRowDragEnded?()
+            } else {
+                // A text field tracks the click itself, waiting for the release,
+                // so the release goes back in the queue before the press is replayed.
+                NSApp.postEvent(event, atStart: true)
+                press(pending.event)
+            }
+        default:
+            super.sendEvent(event)
+        }
+    }
+
     // Clicks on a text field go straight to it (AppKit routes them past the
     // hosting view), so this is where the keyboard is let in.
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, !isKeyWindow,
-           let frameView = contentView?.superview,
+    private func press(_ event: NSEvent) {
+        if !isKeyWindow, let frameView = contentView?.superview,
            isTextEditor(frameView.hitTest(event.locationInWindow)) {
             allowKey = true
             makeKey()
         }
         super.sendEvent(event)
+    }
+
+    private func point(_ event: NSEvent) -> CGPoint {
+        guard let view = contentView else { return .zero }
+        var p = view.convert(event.locationInWindow, from: nil)
+        if !view.isFlipped { p.y = view.bounds.height - p.y }
+        return p
+    }
+
+    private func hitsFieldEditor(_ event: NSEvent) -> Bool {
+        contentView?.superview?.hitTest(event.locationInWindow) is NSTextView
     }
 
     private func isTextEditor(_ view: NSView?) -> Bool {
@@ -735,6 +834,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return grip.insetBy(dx: -4, dy: -4).contains(p)
         }
         host.onDragEnded = { [weak self] in self?.saveFrame() }
+        panel.rowAt = { [weak self] in self?.model.row(at: $0) }
+        panel.onRowDragBegan = { [weak self] id in
+            withAnimation(.easeOut(duration: 0.15)) { self?.model.draggingId = id }
+        }
+        panel.onRowDragged = { [weak self] in self?.model.drag(to: $0) }
+        panel.onRowDragEnded = { [weak self] in
+            withAnimation(.easeOut(duration: 0.15)) { self?.model.draggingId = nil }
+        }
         panel.contentView = host
         fitToContent()
         placeInitially()
