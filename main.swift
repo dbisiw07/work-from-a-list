@@ -405,25 +405,25 @@ struct ItemRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
-            TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
-                .textFieldStyle(.plain)
-                .font(font)
-                .foregroundStyle(item.done ? Theme.faint : Theme.text)
-                .lineLimit(1)
-                .focused($hasFocus)
-                .onSubmit { finish() }
-                .onExitCommand { finish() }
-                // Text fields can't strike through, so a line is drawn over done items.
-                .overlay(alignment: .leading) {
-                    if item.done && !hasFocus {
-                        Text(item.text)
-                            .font(font)
-                            .lineLimit(1)
-                            .hidden()
-                            .overlay { Capsule().fill(Theme.faint).frame(height: 1.5 * scale) }
-                            .allowsHitTesting(false)
-                    }
-                }
+            // Done items are plain text with a real strike-through, so the line always
+            // shows; uncheck an item to edit it again.
+            if item.done {
+                Text(item.text)
+                    .font(font)
+                    .strikethrough(true, color: Theme.dim)
+                    .foregroundStyle(Theme.faint)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
+                    .textFieldStyle(.plain)
+                    .font(font)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .focused($hasFocus)
+                    .onSubmit { finish() }
+                    .onExitCommand { finish() }
+            }
             Image(systemName: "xmark")
                 .font(.system(size: 9 * scale, weight: .bold))
                 .foregroundStyle(Theme.dim)

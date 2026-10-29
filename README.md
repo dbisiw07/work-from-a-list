@@ -12,7 +12,8 @@ the same on any wallpaper, in light or dark mode.
 - Click "What matters today?", type an item and press Return. The box stays
   ready for the next one. Press Return on an empty line, or Esc, and the
   keyboard goes back to the app you were in.
-- Click a circle to check an item off, click its text to edit it, and hover a
+- Click a circle to check an item off; done items are struck through (uncheck
+  one to edit it again). Click an item's text to edit it, and hover a
   row and click × to remove it. An item you edit down to nothing is removed.
 - The header shows the date and a ring with done/total. When the last item is
   checked off, the card glows green, says "All done ✓", and plays a soft chime.
