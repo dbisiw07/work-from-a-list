@@ -1,4 +1,4 @@
-// Today HUD — a floating list of what you're working on today. Seven items, max.
+// Today HUD — a floating list of what you're working on today (up to 25 items).
 //
 // The list is saved for the current day only and starts fresh each morning
 // (6 am by default, matching the focus blocks). There is no ticking timer: the
@@ -19,7 +19,9 @@ struct Item: Codable, Identifiable, Equatable {
 
 /// Override the reset time with `defaults write local.today-hud resetHour -int 6`.
 enum Store {
-    static let maxItems = 7
+    static let maxItems = 25
+    /// Past this many items the list scrolls instead of growing down the screen.
+    static let visibleRows = 10
 
     static var resetHour: Int {
         let d = UserDefaults.standard
@@ -287,16 +289,20 @@ struct TodayView: View {
             // The page: items and the add line, with a notebook margin on Paper
             // between the checkboxes and the writing.
             VStack(alignment: .leading, spacing: 8 * s) {
-                if !model.items.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(model.items) { item in
-                            ItemRow(model: model, item: item, scale: s)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
+                if model.items.count > Store.visibleRows {
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical, showsIndicators: true) { rows }
+                            .frame(height: CGFloat(Store.visibleRows) * ItemRow.height(s))
+                            // A newly added item scrolls into view.
+                            .onChange(of: model.items.count) { _ in
+                                if let last = model.items.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+                            }
                     }
+                } else if !model.items.isEmpty {
+                    rows
                 }
                 if model.isFull {
-                    Text("That's seven. Finish one before adding more.")
+                    Text("That's 25 — plenty for one day.")
                         .font(Theme.font(12 * s))
                         .foregroundStyle(Theme.dim)
                         .padding(.horizontal, 6 * s)
@@ -339,6 +345,15 @@ struct TodayView: View {
             Button("Hide HUD (keep menu bar icon)") { model.onHide?() }
         }
         .fixedSize()
+    }
+
+    private var rows: some View {
+        VStack(spacing: 0) {
+            ForEach(model.items) { item in
+                ItemRow(model: model, item: item, scale: s)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     private var header: some View {
@@ -395,6 +410,7 @@ struct ItemRow: View {
     @FocusState private var hasFocus: Bool
 
     private var hovered: Bool { model.hoveredRow == item.id }
+    static func height(_ scale: CGFloat) -> CGFloat { 34 * scale }
     private var font: Font { Theme.font(15 * scale) }
 
     var body: some View {
@@ -433,7 +449,7 @@ struct ItemRow: View {
                 .opacity(hovered ? 1 : 0)
                 .help("Remove")
         }
-        .padding(.vertical, 6 * scale)
+        .frame(height: Self.height(scale))
         .padding(.horizontal, 6 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)

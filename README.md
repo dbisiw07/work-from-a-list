@@ -1,7 +1,7 @@
 # Today HUD
 
-A floating list of what you're working on today. Seven items at most, so the
-list stays honest.
+A floating list of what you're working on today, up to 25 items. Past 10 the
+list scrolls inside the card instead of growing down the screen.
 
 It looks like a ruled notebook page by default: white paper, dark ink, faint
 blue lines under each item, and a red margin. Right-click → Color, or menu bar
@@ -17,8 +17,7 @@ the same on any wallpaper, in light or dark mode.
   row and click × to remove it. An item you edit down to nothing is removed.
 - The header shows the date and a ring with done/total. When the last item is
   checked off, the card glows green, says "All done ✓", and plays a soft chime.
-- At seven items the add box is replaced by "That's seven. Finish one before
-  adding more."
+- At 25 items the add box is replaced by "That's 25 — plenty for one day."
 - Drag it anywhere and resize it from the bottom-right corner, or right-click →
   Size. Change its look from Color. Hide it with the × in the header or ⌃⌥T. The menu bar shows done/total,
   and its menu lets you check items off, Clear Completed, toggle the chime,
