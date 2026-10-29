@@ -80,6 +80,11 @@ menu bar → Mantras & Header…, to add, edit and delete mantras. They're kept 
 `~/Library/Application Support/WorkFromAList/mantras.txt`, one per line, and editing that
 file works too. Menu bar → Show Mantras turns the line off.
 
+To keep one mantra on show for a while, right-click it under the list → Keep This
+One → 30 minutes, 1, 2 or 4 hours, or the rest of today. In the Mantras window,
+the pin next to any mantra does the same. When the time is up, the rotation
+continues; Back to a New One Every 25 Minutes ends it early.
+
 The same window changes the header: the words after "Today –", the green
 subtitle and the gray motto under it. Put `**two stars**` around a word to make
 it bold, and leave a line empty to hide it.

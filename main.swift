@@ -316,6 +316,13 @@ final class TodayModel: ObservableObject {
     /// The mantra under the list, if mantras are on.
     @Published private(set) var mantra: String?
     private var mantraId: UUID?
+    /// A mantra you chose to keep on show until `heldUntil`, instead of the rotation.
+    @Published private(set) var heldMantra = UserDefaults.standard.string(forKey: "heldMantra")
+    @Published private(set) var heldUntil = UserDefaults.standard.object(forKey: "heldUntil") as? Date
+    /// How long you can keep one; nil is the rest of today (until the morning reset).
+    static let holdChoices: [(label: String, minutes: Int?)] = [
+        ("30 Minutes", 30), ("1 Hour", 60), ("2 Hours", 120), ("4 Hours", 240), ("Rest of Today", nil),
+    ]
     private var mantraSave: DispatchWorkItem?
     private var mantraTimer: Timer?
     private var mantraWatcher: FileWatcher?
@@ -401,15 +408,25 @@ final class TodayModel: ObservableObject {
 
     /// Shows this block's mantra and wakes up for the next block.
     func showMantra() {
+        let now = Date()
         let shown = mantras.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
-        let pick = mantrasOn ? Mantras.pick(of: shown.count).map { shown[$0] } : nil
+        var pick = mantrasOn ? Mantras.pick(of: shown.count).map { shown[$0] } : nil
+        var next = Mantras.nextChange(after: now)
+        if let held = heldMantra {
+            if let until = heldUntil, until > now, let m = shown.first(where: { $0.text == held }) {
+                if mantrasOn { pick = m }
+                next = min(next, until)
+            } else {
+                setHold(nil, until: nil)  // its time is up, or it was deleted
+            }
+        }
         mantraId = pick?.id
         if pick?.text != mantra {
             withAnimation(.easeInOut(duration: 0.6)) { mantra = pick?.text }
         }
         mantraTimer?.invalidate()
         guard mantrasOn else { return }
-        let t = Timer(fire: Mantras.nextChange(after: Date()).addingTimeInterval(1), interval: 0, repeats: false) {
+        let t = Timer(fire: next.addingTimeInterval(1), interval: 0, repeats: false) {
             [weak self] _ in self?.showMantra()
         }
         t.tolerance = 10
@@ -447,6 +464,34 @@ final class TodayModel: ObservableObject {
         }
     }
 
+    /// Keeps `text` on show for `minutes`, or for the rest of today when nil.
+    func hold(_ text: String, minutes: Int?) {
+        let now = Date()
+        let until = minutes.map { now.addingTimeInterval(TimeInterval($0 * 60)) } ?? Store.nextReset(after: now)
+        setHold(text, until: until)
+        showMantra()
+    }
+
+    /// Back to a new mantra every 25 minutes.
+    func releaseHold() {
+        setHold(nil, until: nil)
+        showMantra()
+    }
+
+    private func setHold(_ text: String?, until: Date?) {
+        heldMantra = text
+        heldUntil = until
+        UserDefaults.standard.set(text, forKey: "heldMantra")
+        UserDefaults.standard.set(until, forKey: "heldUntil")
+    }
+
+    /// "until 3:40 PM", or "until tomorrow" for the rest of today.
+    var heldUntilLabel: String {
+        guard let until = heldUntil else { return "" }
+        if until >= Store.nextReset(after: Date()).addingTimeInterval(-60) { return "for the rest of today" }
+        return "until " + until.formatted(date: .omitted, time: .shortened)
+    }
+
     // Managing mantras. Adding or removing one doesn't swap out the one on show.
 
     func addMantra(_ text: String) {
@@ -458,7 +503,9 @@ final class TodayModel: ObservableObject {
 
     func setMantra(_ id: UUID, _ text: String) {
         guard let i = mantras.firstIndex(where: { $0.id == id }) else { return }
-        mantras[i].text = Self.oneLine(text)
+        let new = Self.oneLine(text)
+        if mantras[i].text == heldMantra { setHold(new, until: heldUntil) }  // keep holding it as you edit
+        mantras[i].text = new
         mantrasChanged()
     }
 
@@ -769,7 +816,18 @@ struct TodayView: View {
                                         removal: .opacity))
                 .contentShape(Rectangle())
                 .onTapGesture { model.onManageMantras?() }
-                .help("A new one with each 25-minute focus block. Click to edit your mantras and header.")
+                .contextMenu {
+                    Menu("Keep This One") {
+                        ForEach(TodayModel.holdChoices, id: \.label) { choice in
+                            Button(choice.label) { model.hold(mantra, minutes: choice.minutes) }
+                        }
+                    }
+                    if model.heldMantra != nil { Button("Back to a New One Every 25 Minutes") { model.releaseHold() } }
+                    Button("Edit Mantras…") { model.onManageMantras?() }
+                }
+                .help(model.heldMantra == mantra
+                      ? "Kept \(model.heldUntilLabel). Right-click to change; click to edit your mantras."
+                      : "A new one every 25 minutes. Right-click to keep this one; click to edit your mantras.")
             }
         }
         .padding(16 * s)
@@ -1107,7 +1165,8 @@ struct MantraManager: View {
             .formStyle(.grouped)
             .fixedSize(horizontal: false, vertical: true)
             Text("Mantras").font(.headline).padding(.horizontal, 20)
-            Text("A new one shows under your list with each 25-minute focus block.")
+            Text(model.heldMantra.map { "Keeping “\($0)” \(model.heldUntilLabel)." }
+                 ?? "A new one shows under your list every 25 minutes. Use the pin to keep one for a while.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 20)
@@ -1121,6 +1180,22 @@ struct MantraManager: View {
                             .help(m.text == model.mantra ? "Showing now" : "")
                         TextField("Mantra", text: Binding(get: { m.text }, set: { model.setMantra(m.id, $0) }))
                             .textFieldStyle(.plain)
+                        let held = model.heldMantra == m.text
+                        Menu {
+                            Section("Keep on show for") {
+                                ForEach(TodayModel.holdChoices, id: \.label) { choice in
+                                    Button(choice.label) { model.hold(m.text, minutes: choice.minutes) }
+                                }
+                            }
+                            if held { Button("Back to a New One Every 25 Minutes") { model.releaseHold() } }
+                        } label: {
+                            Image(systemName: held ? "pin.fill" : "pin")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .foregroundStyle(held ? Color.green : Color.secondary)
+                        .help(held ? "Kept \(model.heldUntilLabel)" : "Keep this one on show for a while")
                         Button { model.deleteMantra(m.id) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
                             .foregroundStyle(.secondary)
