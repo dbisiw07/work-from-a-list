@@ -15,11 +15,26 @@ struct Item: Codable, Identifiable, Equatable {
     var id = UUID()
     var text: String
     var done = false
+    /// Must be done today. At most `Store.maxUrgent` open tasks at a time.
+    var urgent = false
+
+    init(text: String) { self.text = text }
+
+    // Lists saved before a field existed still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        text = try c.decode(String.self, forKey: .text)
+        done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
+        urgent = try c.decodeIfPresent(Bool.self, forKey: .urgent) ?? false
+    }
 }
 
 /// Override the reset time with `defaults write local.today-hud resetHour -int 6`.
 enum Store {
     static let maxItems = 25
+    /// Urgent only means something if it's rare, so only a few at once (a WIP limit).
+    static let maxUrgent = 3
     /// Past this many items the list scrolls instead of growing down the screen.
     static let visibleRows = 10
 
@@ -66,9 +81,11 @@ enum Store {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data),
               file.day == dayKey() else { return File(day: dayKey(), items: []) }
-        // Open tasks first, done ones after, each keeping its order.
+        // Urgent first, then the other open tasks, then done ones, each keeping its order.
         let items = Array(file.items.prefix(maxItems))
-        return File(day: file.day, items: items.filter { !$0.done } + items.filter(\.done),
+        let sorted = items.filter { $0.urgent && !$0.done } + items.filter { !$0.urgent && !$0.done }
+            + items.filter(\.done)
+        return File(day: file.day, items: sorted,
                     now: file.now, nowSince: file.nowSince)
     }
 
@@ -154,6 +171,16 @@ final class TodayModel: ObservableObject {
     var isFull: Bool { items.count >= Store.maxItems }
     var allDone: Bool { !items.isEmpty && doneCount == items.count }
     var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
+    var urgentCount: Int { items.filter { $0.urgent && !$0.done }.count }
+    var canMarkUrgent: Bool { urgentCount < Store.maxUrgent }
+
+    /// Where an item belongs: urgent at the top, then other open tasks, then done
+    /// (newly finished ones at the top of the done group).
+    private func slot(for item: Item) -> Int {
+        if item.done { return items.firstIndex(where: \.done) ?? items.count }
+        if item.urgent { return items.firstIndex(where: { !$0.urgent || $0.done }) ?? items.count }
+        return items.firstIndex(where: \.done) ?? items.count
+    }
 
     func start() {
         Store.save(items, now: nowItem?.id, since: nowSince)  // replaces yesterday's file right away if the day has turned
@@ -242,11 +269,10 @@ final class TodayModel: ObservableObject {
             var item = items.remove(at: i)
             item.done.toggle()
             if item.done, nowId == id { nowId = nil }  // finishing it ends "now"
-            // Like Linear's status groups: open tasks on top, done ones below. A task
-            // you finish goes to the top of the done group, one you reopen to the
-            // bottom of the open ones.
-            let firstDone = items.firstIndex(where: \.done) ?? items.count
-            items.insert(item, at: firstDone)
+            // Reopening can't push urgent past the limit.
+            if !item.done, item.urgent, !canMarkUrgent { item.urgent = false }
+            // Like Linear's status groups: open tasks on top, done ones below.
+            items.insert(item, at: slot(for: item))
         }
         if allDone { celebrate() }
     }
@@ -263,13 +289,28 @@ final class TodayModel: ObservableObject {
         return items.first { rowFrames[$0.id]?.contains(point) == true }?.id
     }
 
+    /// Urgent, other open, done: dragging reorders within a group.
+    static func group(_ item: Item) -> Int { item.done ? 2 : item.urgent ? 0 : 1 }
+
     /// Moves the dragged item into the slot of the row under the cursor.
     func drag(to point: CGPoint) {
         guard let id = draggingId, let from = items.firstIndex(where: { $0.id == id }),
               let target = row(at: point), target != id,
-              let to = items.firstIndex(where: { $0.id == target }) else { return }
+              let to = items.firstIndex(where: { $0.id == target }),
+              Self.group(items[from]) == Self.group(items[to]) else { return }  // stays in its group
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             items.insert(items.remove(at: from), at: to)
+        }
+    }
+
+    /// Flags a task as must-do-today and moves it up with the other urgent ones.
+    func toggleUrgent(_ id: UUID) {
+        guard let i = items.firstIndex(where: { $0.id == id }), !items[i].done else { return }
+        guard items[i].urgent || canMarkUrgent else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            var item = items.remove(at: i)
+            item.urgent.toggle()
+            items.insert(item, at: slot(for: item))
         }
     }
 
@@ -302,7 +343,9 @@ final class TodayModel: ObservableObject {
         guard let r = removed, !isFull else { return }
         undoWork?.cancel()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            items.insert(r.item, at: min(r.index, items.count))
+            var item = r.item
+            if item.urgent, !item.done, !canMarkUrgent { item.urgent = false }
+            items.insert(item, at: min(r.index, items.count))
             if r.wasNow {
                 nowId = r.item.id
                 nowSince = r.since
@@ -371,6 +414,8 @@ enum ThemeChoice: String, CaseIterable, Identifiable {
     }
 
     var green: Color { isLight ? Self.rgb(0.10, 0.55, 0.28) : Self.rgb(0.62, 1.00, 0.72) }
+    /// Urgent, like Linear's orange.
+    var urgent: Color { isLight ? Self.rgb(0.93, 0.42, 0.08) : Self.rgb(1.00, 0.62, 0.30) }
     /// In progress is a quiet gray; green stays for done.
     var progress: Color { isLight ? Self.rgb(0.42, 0.44, 0.50) : Color(white: 0.78) }
 
@@ -388,6 +433,7 @@ enum Theme {
     static var accent: Color { choice.accent }
     static var green: Color { choice.green }
     static var progress: Color { choice.progress }
+    static var urgent: Color { choice.urgent }
     /// The check inside a done circle: white on Paper's green, card-dark on the mint.
     static var checkMark: Color { choice.isLight ? .white : choice.card[1] }
     static var rule: Color { choice.rule }
@@ -619,6 +665,19 @@ struct ItemRow: View {
                 .help("Time since you started on this")
             }
             if !item.done {
+                let blocked = !item.urgent && !model.canMarkUrgent
+                Image(systemName: item.urgent ? "exclamationmark.square.fill" : "exclamationmark.square")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(item.urgent ? Theme.urgent : Theme.dim)
+                    .frame(width: 16 * scale, height: 16 * scale)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.toggleUrgent(item.id) }
+                    .opacity(item.urgent ? 1 : hovered ? (blocked ? 0.35 : 1) : 0)
+                    .help(item.urgent ? "Not urgent"
+                          : blocked ? "\(Store.maxUrgent) urgent already — finish one first"
+                          : "Urgent: must be done today")
+                    .accessibilityLabel(item.urgent ? "Not urgent" : "Urgent")
+                    .accessibilityAddTraits(.isButton)
                 Image(systemName: isNow ? "pin.fill" : "pin")
                     .font(.system(size: 11 * scale, weight: .semibold))
                     .rotationEffect(.degrees(30))
@@ -1262,7 +1321,8 @@ extension AppDelegate: NSMenuDelegate {
             menu.addItem(entry)
         }
         for item in model.items {
-            let entry = NSMenuItem(title: short(item.text), action: #selector(toggleItem(_:)), keyEquivalent: "")
+            let title = item.urgent && !item.done ? "! " + short(item.text) : short(item.text)
+            let entry = NSMenuItem(title: title, action: #selector(toggleItem(_:)), keyEquivalent: "")
             entry.target = self
             entry.representedObject = item.id
             entry.state = item.done ? .on : item.id == model.nowItem?.id ? .mixed : .off

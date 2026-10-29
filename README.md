@@ -22,6 +22,11 @@ the same on any wallpaper, in light or dark mode.
 - **Remove:** hover a task and click ×. "Removed … Undo" shows in its place for
   5 seconds if you change your mind.
 - **Reorder:** drag a task up or down; the others slide out of the way.
+- **Urgent:** hover a task and click the "!" to mark it as must-be-done-today.
+  It gets an orange "!" and moves to the top, above the other open tasks. Only
+  3 tasks can be urgent at once (done ones don't count), so urgent stays
+  meaningful; finish one to free a slot. Dragging reorders tasks within their
+  group: urgent, the rest, and done.
 - **Working on now:** hover a task and click the pin. Its circle turns
   half-filled, a green pin stays on it with how long you've been on it ("40m",
   updated once a minute), and the menu bar shows that task
