@@ -1,4 +1,4 @@
-// Today HUD — a floating list of what you're working on today (up to 25 items).
+// Work from a List — a floating list of what you're working on today (up to 25 items).
 //
 // Each morning (5 am by default, before an early start) done tasks clear
 // and unfinished ones carry over, urgent flags included. There is no ticking timer: the
@@ -30,7 +30,7 @@ struct Item: Codable, Identifiable, Equatable {
     }
 }
 
-/// Override the reset time with `defaults write local.today-hud resetHour -int 5`.
+/// Override the reset time with `defaults write io.github.dbisiw07.work-from-a-list resetHour -int 5`.
 enum Store {
     static let maxItems = 25
     /// Urgent only means something if it's rare, so only a few at once (a WIP limit).
@@ -43,10 +43,10 @@ enum Store {
         return d.object(forKey: "resetHour") == nil ? 5 : d.integer(forKey: "resetHour")
     }
 
-    /// Today's list: ~/Library/Application Support/TodayHUD/today.json
+    /// Today's list: ~/Library/Application Support/WorkFromAList/today.json
     static var url: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TodayHUD/today.json")
+            .appendingPathComponent("WorkFromAList/today.json")
     }
 
     /// The list's day: before the reset hour it still belongs to yesterday. Goes by
@@ -110,7 +110,7 @@ enum Store {
             lastWritten = data
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("Today HUD: couldn't save list: \(error)")
+            NSLog("Work from a List: couldn't save list: \(error)")
         }
     }
 }
@@ -154,7 +154,7 @@ final class FileWatcher {
 }
 
 /// The flash under the list: one of your mantras, changed with each 25-minute focus
-/// block. Edit them in ~/Library/Application Support/TodayHUD/mantras.txt, one per line.
+/// block. Edit them in ~/Library/Application Support/WorkFromAList/mantras.txt, one per line.
 enum Mantras {
     static var url: URL { Store.url.deletingLastPathComponent().appendingPathComponent("mantras.txt") }
 
@@ -188,14 +188,14 @@ enum Mantras {
 
     static func save(_ list: [String]) {
         let lines = list.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let text = "# One mantra per line. Today HUD shows a new one with each 25-minute focus block.\n"
+        let text = "# One mantra per line. Work from a List shows a new one with each 25-minute focus block.\n"
             + lines.map { $0 + "\n" }.joined()
         lastText = text
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try text.write(to: url, atomically: true, encoding: .utf8)
         } catch {
-            NSLog("Today HUD: couldn't save mantras: \(error)")
+            NSLog("Work from a List: couldn't save mantras: \(error)")
         }
     }
 
@@ -1830,6 +1830,25 @@ if CommandLine.arguments.contains("--test") {
     print(failures == 0 ? "All checks passed." : "\(failures) check(s) failed.")
     exit(failures == 0 ? 0 : 1)
 }
+
+/// The app used to be called Today HUD. Its list, mantras and settings move over
+/// once, the first time the new name runs.
+func moveFromTodayHUD() {
+    let fm = FileManager.default
+    let old = Store.url.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("TodayHUD")
+    let new = Store.url.deletingLastPathComponent()
+    if !fm.fileExists(atPath: new.path), fm.fileExists(atPath: old.path) {
+        try? fm.moveItem(at: old, to: new)
+    }
+    let defaults = UserDefaults.standard
+    if defaults.object(forKey: "movedFromTodayHUD") == nil {
+        for (key, value) in defaults.persistentDomain(forName: "local.today-hud") ?? [:] where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+        defaults.set(true, forKey: "movedFromTodayHUD")
+    }
+}
+moveFromTodayHUD()
 
 if CommandLine.arguments.contains("--print") {
     print("Today (\(Store.dayKey())), resets at \(Store.resetHour):00 — \(Store.url.path)")

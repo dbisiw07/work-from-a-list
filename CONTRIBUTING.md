@@ -3,7 +3,7 @@
 Thanks for helping. Bugs, ideas and pull requests are all welcome.
 
 - **Found a bug or have an idea?** Open an issue. For ideas, say what you were
-  trying to do; Today HUD stays small on purpose, so the "why" matters most.
+  trying to do; Work from a List stays small on purpose, so the "why" matters most.
 - **Want to change code?** Read [AGENTS.md](AGENTS.md) first. It's short and
   covers building, the `--test` checks, where things live and the few rules the
   app depends on (it stays light, never steals focus, never loses your list).

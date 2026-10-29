@@ -3,4 +3,4 @@
 set -eu
 cd "$(dirname "$0")"
 ./build.sh
-./get.sh "Today HUD.app"
+./get.sh "Work from a List.app"

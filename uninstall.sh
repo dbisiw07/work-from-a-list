@@ -1,17 +1,17 @@
 #!/bin/sh
-# Stops Today HUD and removes the app and its LaunchAgent. Your list, mantras and
+# Stops Work from a List and removes the app and its LaunchAgent. Your list, mantras and
 # settings stay; add --all to remove those too.
-#   curl -fsSL https://raw.githubusercontent.com/dbisiw07/today-hud/main/uninstall.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/dbisiw07/work-from-a-list/main/uninstall.sh | sh
 set -u
-LABEL="local.today-hud"
+LABEL="io.github.dbisiw07.work-from-a-list"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
-pkill -x TodayHUD 2>/dev/null
+pkill -x WorkFromAList 2>/dev/null
 rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
-rm -rf "$HOME/Applications/Today HUD.app"
+rm -rf "$HOME/Applications/Work from a List.app"
 if [ "${1:-}" = "--all" ]; then
-  rm -rf "$HOME/Library/Application Support/TodayHUD"
+  rm -rf "$HOME/Library/Application Support/WorkFromAList"
   defaults delete "$LABEL" 2>/dev/null
-  echo "Today HUD and its data removed."
+  echo "Work from a List and its data removed."
 else
-  echo "Today HUD removed. Your list and mantras are still in ~/Library/Application Support/TodayHUD."
+  echo "Work from a List removed. Your list and mantras are still in ~/Library/Application Support/WorkFromAList."
 fi

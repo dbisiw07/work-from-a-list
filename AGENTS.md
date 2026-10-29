@@ -1,15 +1,15 @@
-# Working on Today HUD
+# Working on Work from a List
 
-Today HUD is a floating macOS to-do list for one day. It's one Swift file
+Work from a List is a floating macOS to-do list for one day. It's one Swift file
 (`main.swift`, AppKit + SwiftUI, no packages, no Xcode project) built with `swiftc`.
 These notes are for anyone changing the code, people and AI coding agents alike.
 
 ## Build and check
 
 ```sh
-./build.sh                                            # builds "Today HUD.app" here
-"Today HUD.app/Contents/MacOS/TodayHUD" --test        # logic checks, no window; exit 1 on failure
-"Today HUD.app/Contents/MacOS/TodayHUD" --print       # prints today's list
+./build.sh                                            # builds "Work from a List.app" here
+"Work from a List.app/Contents/MacOS/WorkFromAList" --test        # logic checks, no window; exit 1 on failure
+"Work from a List.app/Contents/MacOS/WorkFromAList" --print       # prints today's list
 ./install.sh                                          # build, install to ~/Applications, (re)start
 ```
 
@@ -36,7 +36,7 @@ add a check next to the others at the bottom of `main.swift`.
   animation costs real CPU in a SwiftUI panel, so animations run once and finish.
 - **Never steals focus.** The panel is non-activating. It takes the keyboard only
   while you type in it (`allowKey`) and hands it back on Return or Esc.
-- **Your data is plain files.** `~/Library/Application Support/TodayHUD/today.json`
+- **Your data is plain files.** `~/Library/Application Support/WorkFromAList/today.json`
   and `mantras.txt`. Other apps may write them at any time; `FileWatcher` reloads.
   Keep the JSON readable by older versions: new fields must be optional
   (`decodeIfPresent`). Never lose a list: a file that won't decode is ignored, not
@@ -54,14 +54,14 @@ add a check next to the others at the bottom of `main.swift`.
 throwaway list, back it up first:
 
 ```sh
-cp ~/Library/Application\ Support/TodayHUD/today.json /tmp/today-backup.json
+cp ~/Library/Application\ Support/WorkFromAList/today.json /tmp/today-backup.json
 # … test …
-cp /tmp/today-backup.json ~/Library/Application\ Support/TodayHUD/today.json
+cp /tmp/today-backup.json ~/Library/Application\ Support/WorkFromAList/today.json
 ```
 
 Or point a run at a fake home, which leaves your files alone (quit the installed
 HUD first, since only one copy runs):
-`CFFIXED_USER_HOME=/tmp/fakehome "Today HUD.app/Contents/MacOS/TodayHUD"`.
+`CFFIXED_USER_HOME=/tmp/fakehome "Work from a List.app/Contents/MacOS/WorkFromAList"`.
 
 For anything visible, take a screenshot (`screencapture -x shot.png`) and look at
 it; describe what you checked in the pull request.
@@ -69,4 +69,4 @@ it; describe what you checked in the pull request.
 ## Releases
 
 Push a tag like `v1.0`. CI builds the universal app with `release.sh`, runs the
-checks and publishes `Today-HUD.zip` on the release, which `get.sh` installs.
+checks and publishes `Work-from-a-List.zip` on the release, which `get.sh` installs.

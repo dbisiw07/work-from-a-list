@@ -1,4 +1,4 @@
-# Today HUD
+# Work from a List
 
 A small floating list of what you're working on today. It sits above every
 app without taking focus, keeps up to 25 tasks, and clears what you finished each morning.
@@ -15,7 +15,7 @@ You need macOS 13 (Ventura) or later, on Apple silicon or Intel. Paste this into
 Terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dbisiw07/today-hud/main/get.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dbisiw07/work-from-a-list/main/get.sh | sh
 ```
 
 That downloads the latest release into `~/Applications` and starts it. It also
@@ -23,7 +23,7 @@ starts at login and comes back if it ever crashes; choosing Quit keeps it closed
 until your next login. Run the same line again to update. To remove it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dbisiw07/today-hud/main/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dbisiw07/work-from-a-list/main/uninstall.sh | sh
 ```
 
 Your list and mantras stay unless you add `-s -- --all` after `sh`.
@@ -70,7 +70,7 @@ Under the list a quiet ✦ line shows one of your mantras. It changes every 25
 minutes, counted from 6:00, and none repeats until all have shown; each day
 gets a new order. Click it, or choose
 menu bar → Mantras & Header…, to add, edit and delete mantras. They're kept in
-`~/Library/Application Support/TodayHUD/mantras.txt`, one per line, and editing that
+`~/Library/Application Support/WorkFromAList/mantras.txt`, one per line, and editing that
 file works too. Menu bar → Show Mantras turns the line off.
 
 The same window changes the header: the words after "Today –", the green
@@ -79,13 +79,13 @@ it bold, and leave a line empty to hide it.
 
 ## Each morning
 
-The list is saved in `~/Library/Application Support/TodayHUD/today.json`.
+The list is saved in `~/Library/Application Support/WorkFromAList/today.json`.
 Each morning at 5 am the done tasks clear and the unfinished ones carry over
 to the new day in the same order. Urgent tasks stay urgent until you finish
 them or clear the flag. The "now" pin clears, so each morning you choose what
 to start on.
 Until 5 am a list you make after midnight still counts as today's. To change the reset hour, run
-`defaults write local.today-hud resetHour -int 5` and restart the app.
+`defaults write io.github.dbisiw07.work-from-a-list resetHour -int 5` and restart the app.
 
 ## Changing the list from other apps
 
@@ -114,13 +114,13 @@ You need Apple's command line tools for the Swift compiler. If
 `swiftc --version` doesn't work, run `xcode-select --install` first.
 
 ```sh
-git clone https://github.com/dbisiw07/today-hud && cd today-hud
+git clone https://github.com/dbisiw07/work-from-a-list && cd work-from-a-list
 ./install.sh     # build, install to ~/Applications and start
-./build.sh       # just build "Today HUD.app" in this folder
+./build.sh       # just build "Work from a List.app" in this folder
 ./uninstall.sh   # stop it and remove the app and LaunchAgent
 ```
 
-`"Today HUD.app/Contents/MacOS/TodayHUD" --print` prints today's list, and
+`"Work from a List.app/Contents/MacOS/WorkFromAList" --print` prints today's list, and
 `--test` runs the checks.
 
 ## Contributing

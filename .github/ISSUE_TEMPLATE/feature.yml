@@ -1,10 +1,10 @@
 name: Idea
-description: Suggest something that would make Today HUD better.
+description: Suggest something that would make Work from a List better.
 labels: [enhancement]
 body:
   - type: textarea
     attributes:
       label: What would you like, and why?
-      description: The problem you hit matters more than the solution. Today HUD stays small on purpose, so say what it helps you do.
+      description: The problem you hit matters more than the solution. Work from a List stays small on purpose, so say what it helps you do.
     validations:
       required: true
