@@ -272,6 +272,8 @@ enum ThemeChoice: String, CaseIterable, Identifiable {
     }
 
     var green: Color { isLight ? Self.rgb(0.10, 0.55, 0.28) : Self.rgb(0.62, 1.00, 0.72) }
+    /// In progress is amber, like Linear; green stays for done.
+    var amber: Color { isLight ? Self.rgb(0.86, 0.52, 0.04) : Self.rgb(1.00, 0.74, 0.32) }
 
     static var saved: ThemeChoice {
         ThemeChoice(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .paper
@@ -286,6 +288,7 @@ enum Theme {
     static var faint: Color { choice.text.opacity(choice.isLight ? 0.42 : 0.5) }
     static var accent: Color { choice.accent }
     static var green: Color { choice.green }
+    static var amber: Color { choice.amber }
     static var rule: Color { choice.rule }
 
     static func font(_ size: CGFloat, bold: Bool = false) -> Font {
@@ -434,10 +437,10 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 10 * scale) {
-            // A half-filled circle marks the one in progress, like Linear.
+            // A half-filled amber circle marks the one in progress, like Linear.
             Image(systemName: item.done ? "checkmark.circle" : isNow ? "circle.lefthalf.filled" : "circle")
                 .font(.system(size: 17 * scale, weight: item.done || isNow ? .semibold : .regular))
-                .foregroundStyle(item.done || isNow ? Theme.green : hovered ? Theme.text : Theme.dim)
+                .foregroundStyle(item.done ? Theme.green : isNow ? Theme.amber : hovered ? Theme.text : Theme.dim)
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
@@ -465,7 +468,7 @@ struct ItemRow: View {
                 Image(systemName: isNow ? "pin.fill" : "pin")
                     .font(.system(size: 11 * scale, weight: .semibold))
                     .rotationEffect(.degrees(30))
-                    .foregroundStyle(isNow ? Theme.green : Theme.dim)
+                    .foregroundStyle(isNow ? Theme.amber : Theme.dim)
                     .frame(width: 16 * scale, height: 16 * scale)
                     .contentShape(Rectangle())
                     .onTapGesture { model.setNow(item.id) }
@@ -485,7 +488,7 @@ struct ItemRow: View {
         .padding(.horizontal, 6 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
-                .fill(isNow ? Theme.green.opacity(Theme.choice.isLight ? 0.10 : 0.16)
+                .fill(isNow ? Theme.amber.opacity(Theme.choice.isLight ? 0.12 : 0.16)
                             : Theme.text.opacity(hovered ? 0.06 : 0))
         )
         .overlay(alignment: .bottom) {
@@ -861,7 +864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusKey = key
         var image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Today list")
         if now != nil {
-            image = image?.withSymbolConfiguration(.init(paletteColors: [.systemGreen]))
+            image = image?.withSymbolConfiguration(.init(paletteColors: [.systemOrange]))
         }
         image?.isTemplate = now == nil
         button.image = image

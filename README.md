@@ -16,7 +16,7 @@ the same on any wallpaper, in light or dark mode.
   one to edit it again). Click an item's text to edit it, and hover a
   row and click × to remove it. An item you edit down to nothing is removed.
 - Hover a row and click the pin to mark it as the one you're working on now.
-  Like Linear's In Progress, its circle turns half-filled green and the row
+  Like Linear's In Progress, its circle turns half-filled amber (green is for done) and the row
   is lightly tinted, and the menu bar shows that task instead of the count, so
   you can see it from any app. Only one item can be "now": pinning another moves
   it, and checking it off or clicking the pin again clears it.
