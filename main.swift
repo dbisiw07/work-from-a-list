@@ -1,7 +1,7 @@
 // Today HUD — a floating list of what you're working on today (up to 25 items).
 //
-// The list is saved for the current day only and starts fresh each morning
-// (6 am by default, matching the focus blocks). There is no ticking timer: the
+// Each morning (6 am by default, matching the focus blocks) done tasks clear
+// and unfinished ones carry over, urgent flags included. There is no ticking timer: the
 // app sleeps until you touch the list, plus one wake-up a day for the reset.
 
 import AppKit
@@ -43,7 +43,7 @@ enum Store {
         return d.object(forKey: "resetHour") == nil ? 6 : d.integer(forKey: "resetHour")
     }
 
-    /// Just today's list, overwritten each day: ~/Library/Application Support/TodayHUD/today.json
+    /// Today's list: ~/Library/Application Support/TodayHUD/today.json
     static var url: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TodayHUD/today.json")
@@ -79,11 +79,20 @@ enum Store {
 
     static func load() -> File {
         guard let data = try? Data(contentsOf: url),
-              let file = try? JSONDecoder().decode(File.self, from: data),
-              file.day == dayKey() else { return File(day: dayKey(), items: []) }
+              let file = try? JSONDecoder().decode(File.self, from: data) else { return File(day: dayKey(), items: []) }
+        // A list from an earlier day: unfinished tasks carry over, with their urgent
+        // flags and the "now" pin and its running time; done ones clear.
+        guard file.day == dayKey() else {
+            return File(day: dayKey(), items: carryOver(file.items), now: file.now, nowSince: file.nowSince)
+        }
         // Kept in the order you left it, including anything you dragged.
         return File(day: file.day, items: Array(file.items.prefix(maxItems)),
                     now: file.now, nowSince: file.nowSince)
+    }
+
+    /// What a new day starts with: yesterday's unfinished tasks, in order, still urgent if they were.
+    static func carryOver(_ items: [Item]) -> [Item] {
+        Array(items.filter { !$0.done }.prefix(maxItems))
     }
 
     static func save(_ items: [Item], now: UUID?, since: Date?) {
@@ -195,15 +204,15 @@ final class TodayModel: ObservableObject {
         }
     }
 
-    /// Starts a fresh list once the reset hour has passed.
+    /// Starts the new day once the reset hour has passed: done tasks clear,
+    /// unfinished ones stay.
     func checkDay() {
         let key = Store.dayKey()
         if key != day {
             day = key
             onFinishEditing?()
             draft = ""
-            items = []
-            nowId = nil
+            items = Store.carryOver(items)  // the "now" pin stays, and its time keeps counting
             removed = nil
         }
         scheduleReset()
@@ -723,10 +732,14 @@ struct ItemRow: View {
         }
     }
 
-    /// "0m", "40m", "1h 5m".
+    /// "0m", "40m", "1h 5m", "1d 3h".
     static func elapsed(from start: Date, to now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
         if minutes < 60 { return "\(minutes)m" }
+        if minutes >= 24 * 60 {
+            let hours = minutes / 60
+            return hours % 24 == 0 ? "\(hours / 24)d" : "\(hours / 24)d \(hours % 24)h"
+        }
         return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
     }
 
@@ -1387,7 +1400,9 @@ extension AppDelegate: NSMenuDelegate {
 if CommandLine.arguments.contains("--print") {
     print("Today (\(Store.dayKey())), resets at \(Store.resetHour):00 — \(Store.url.path)")
     let file = Store.load()
-    for item in file.items { print(item.done ? "[x]" : item.id == file.now ? "[>]" : "[ ]", item.text) }
+    for item in file.items {
+        print(item.done ? "[x]" : item.id == file.now ? "[>]" : "[ ]", item.urgent && !item.done ? "! " + item.text : item.text)
+    }
     exit(0)
 }
 

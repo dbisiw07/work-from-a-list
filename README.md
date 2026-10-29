@@ -1,7 +1,7 @@
 # Today HUD
 
 A small floating list of what you're working on today. It sits above every
-app without taking focus, keeps up to 25 tasks, and starts fresh each morning.
+app without taking focus, keeps up to 25 tasks, and clears what you finished each morning.
 
 It looks like a ruled notebook page by default: white paper, dark ink, faint
 blue lines under each task, and a red margin. Right-click → Color, or menu bar
@@ -45,12 +45,14 @@ the same on any wallpaper, in light or dark mode.
 Past 10 tasks the list scrolls inside the card instead of growing down the
 screen. At 25 the add line says "That's 25 — plenty for one day."
 
-## One day at a time
+## Each morning
 
-Only today's list is saved, in
-`~/Library/Application Support/TodayHUD/today.json`. Each morning at 6 am it
-starts fresh and the file is overwritten. Until then a list you make after
-midnight still counts as today's. To change the reset hour, run
+The list is saved in `~/Library/Application Support/TodayHUD/today.json`.
+Each morning at 6 am the done tasks clear and the unfinished ones carry over
+to the new day in the same order. Urgent tasks stay urgent until you finish
+them or clear the flag, and the "now" pin stays with its time still counting
+(past a day it reads like "1d 3h").
+Until 6 am a list you make after midnight still counts as today's. To change the reset hour, run
 `defaults write local.today-hud resetHour -int 6` and restart the app.
 
 ## How it stays light
