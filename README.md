@@ -1,5 +1,7 @@
 # Work from a List
 
+<p align="center"><img src="docs/screenshot.png" width="448" alt="Work from a List: a floating card titled Today, with an urgent task, a pinned task at 43 minutes, two open tasks, two done tasks struck through, and a mantra at the bottom"></p>
+
 A small floating list of what you're working on today. It sits above every
 app without taking focus, keeps up to 25 tasks, and clears what you finished each morning.
 
