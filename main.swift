@@ -381,7 +381,7 @@ struct TodayView: View {
                 .strokeBorder(model.allDoneGlow ? Theme.green.opacity(0.85) : Theme.text.opacity(0.14),
                               lineWidth: model.allDoneGlow ? 2 * s : 1)
         )
-        .overlay(alignment: .trailing) { WidthEdge(model: model, scale: s) }
+        .overlay(alignment: .trailing) { WidthEdge() }
         .overlay(alignment: .bottomTrailing) { ResizeGrip(model: model, scale: s) }
         .tint(Theme.accent)
         .contentShape(Rectangle())
@@ -604,24 +604,16 @@ struct FrameReporter: View {
 /// The right edge: drag it to make the card wider or narrower. Matches the
 /// zone the hosting view treats as a width drag.
 struct WidthEdge: View {
-    @ObservedObject var model: TodayModel
-    let scale: CGFloat
-    @State private var inside = false
     /// Inside the card's padding, so it never overlaps a row.
     static let thickness: CGFloat = 12
 
     var body: some View {
-        // A small handle shows where to grab while you hover the HUD.
-        Capsule()
-            .fill(Theme.text.opacity(inside ? 0.45 : 0.18))
-            .frame(width: 4 * scale, height: 36 * scale)
-            .opacity(model.hover ? 1 : 0)
+        Color.clear
             .frame(width: Self.thickness)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
-            .onHover { now in
-                inside = now
-                if now { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
             .help("Drag to make it wider or narrower")
     }
