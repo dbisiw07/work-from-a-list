@@ -50,8 +50,8 @@ screen. At 25 the add line says "That's 25 — plenty for one day."
 The list is saved in `~/Library/Application Support/TodayHUD/today.json`.
 Each morning at 6 am the done tasks clear and the unfinished ones carry over
 to the new day in the same order. Urgent tasks stay urgent until you finish
-them or clear the flag, and the "now" pin stays with its time still counting
-(past a day it reads like "1d 3h").
+them or clear the flag. The "now" pin clears, so each morning you choose what
+to start on.
 Until 6 am a list you make after midnight still counts as today's. To change the reset hour, run
 `defaults write local.today-hud resetHour -int 6` and restart the app.
 

@@ -80,11 +80,9 @@ enum Store {
     static func load() -> File {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data) else { return File(day: dayKey(), items: []) }
-        // A list from an earlier day: unfinished tasks carry over, with their urgent
-        // flags and the "now" pin and its running time; done ones clear.
-        guard file.day == dayKey() else {
-            return File(day: dayKey(), items: carryOver(file.items), now: file.now, nowSince: file.nowSince)
-        }
+        // A list from an earlier day: unfinished tasks carry over with their urgent
+        // flags; done ones and the "now" pin clear.
+        guard file.day == dayKey() else { return File(day: dayKey(), items: carryOver(file.items)) }
         // Kept in the order you left it, including anything you dragged.
         return File(day: file.day, items: Array(file.items.prefix(maxItems)),
                     now: file.now, nowSince: file.nowSince)
@@ -212,7 +210,8 @@ final class TodayModel: ObservableObject {
             day = key
             onFinishEditing?()
             draft = ""
-            items = Store.carryOver(items)  // the "now" pin stays, and its time keeps counting
+            items = Store.carryOver(items)
+            nowId = nil  // each morning you choose what to start on
             removed = nil
         }
         scheduleReset()
@@ -732,14 +731,10 @@ struct ItemRow: View {
         }
     }
 
-    /// "0m", "40m", "1h 5m", "1d 3h".
+    /// "0m", "40m", "1h 5m".
     static func elapsed(from start: Date, to now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
         if minutes < 60 { return "\(minutes)m" }
-        if minutes >= 24 * 60 {
-            let hours = minutes / 60
-            return hours % 24 == 0 ? "\(hours / 24)d" : "\(hours / 24)d \(hours % 24)h"
-        }
         return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
     }
 
