@@ -360,7 +360,9 @@ final class TodayModel: ObservableObject {
 
     /// Where an item belongs: urgent at the top, then other open tasks, then done
     /// (newly finished ones at the top of the done group).
-    private func slot(for item: Item) -> Int {
+    private func slot(for item: Item) -> Int { Self.slot(for: item, in: items) }
+
+    static func slot(for item: Item, in items: [Item]) -> Int {
         if item.done { return items.firstIndex(where: \.done) ?? items.count }
         if item.urgent { return items.firstIndex(where: { !$0.urgent || $0.done }) ?? items.count }
         return items.firstIndex(where: \.done) ?? items.count
@@ -1895,6 +1897,26 @@ if CommandLine.arguments.contains("--test") {
     check(Mantras.pick(of: 5, at: date(2026, 3, 10, 2)) != nil, "before the first block still shows one")
     check(Mantras.nextChange(after: date(2026, 3, 10, 9, 31)) > date(2026, 3, 10, 9, 31), "the next change is in the future")
 
+    // The command line.
+    func cli(_ args: [String], _ file: Store.File) -> Store.File? { (try? CLI.perform(args, on: file))?.0 }
+    let empty = Store.File(day: today, items: [])
+    let one = cli(["add", "Call", "the", "bank"], empty)
+    check(one?.items.map(\.text) == ["Call the bank"], "add joins the words")
+    var withDone = Store.File(day: today, items: [c, b])  // b is done, so it sits below
+    withDone = cli(["add", "new"], withDone) ?? withDone
+    check(withDone.items.map(\.text) == ["c", "new", "b"], "a new task goes above done ones")
+    let flagged = cli(["add", "-u", "fire"], withDone)
+    check(flagged?.items.first?.text == "fire" && flagged?.items.first?.urgent == true, "add -u puts it on top as urgent")
+    let pinned = cli(["now", "1"], withDone)
+    check(pinned?.now == withDone.items[0].id && pinned?.nowSince != nil, "now pins with a start time")
+    check(cli(["done", "1"], pinned!)?.now == nil, "checking off the pinned task unpins it")
+    check(cli(["done", "9"], withDone) == nil && cli(["done", "x"], withDone) == nil, "bad numbers are refused")
+    check(cli(["rm", "3"], withDone)?.items.count == 2, "rm removes")
+    let threeUrgent = Store.File(day: today, items: (0..<3).map { var i = Item(text: "u\($0)"); i.urgent = true; return i } + [c])
+    check(cli(["urgent", "4"], threeUrgent) == nil && cli(["add", "-u", "x"], threeUrgent) == nil, "no fourth urgent")
+    check(cli(["now", "1"], Store.File(day: today, items: [b])) == nil, "a done task can't be now")
+    check((try? CLI.perform([], on: withDone))?.1.contains("1  ○ c") == true, "the list is numbered")
+
     // Small formatting.
     let t0 = date(2026, 3, 10, 9)
     check(ItemRow.elapsed(from: t0, to: t0.addingTimeInterval(30)) == "0m", "under a minute is 0m")
@@ -1925,13 +1947,129 @@ func moveFromTodayHUD() {
 }
 moveFromTodayHUD()
 
-if CommandLine.arguments.contains("--print") {
-    print("Today (\(Store.dayKey())), resets at \(Store.resetHour):00 — \(Store.url.path)")
-    let file = Store.load()
-    for item in file.items {
-        print(item.done ? "[x]" : item.id == file.now ? "[>]" : "[ ]", item.urgent && !item.done ? "! " + item.text : item.text)
+// MARK: - Command line
+
+/// `today …`: your list from a terminal, here or over SSH. Changes are written to
+/// today.json, and a running HUD shows them within a moment.
+enum CLI {
+    static let commands: Set<String> = ["list", "add", "done", "now", "urgent", "rm", "help", "--help", "-h"]
+
+    static let usage = """
+    today                 show today's list
+    today add <task>      add a task (today add -u <task> for urgent)
+    today done <n>        check off task n (again to reopen it)
+    today now <n>         pin task n as the one you're on (again to unpin)
+    today urgent <n>      flag or unflag task n as urgent
+    today rm <n>          remove task n
+    """
+
+    struct Failure: Error { let message: String }
+
+    /// Applies one command to `file`. Returns the changed file (nil if nothing
+    /// changed) and what to print. No disk access, so `--test` can check it.
+    static func perform(_ args: [String], on file: Store.File, now: Date = Date()) throws -> (Store.File?, String) {
+        var file = file
+        guard let command = args.first, command != "list" else { return (nil, render(file, now: now)) }
+        if ["help", "--help", "-h"].contains(command) { return (nil, usage) }
+        var rest = Array(args.dropFirst())
+
+        if command == "add" {
+            var urgent = false
+            if let flag = rest.first, flag == "-u" || flag == "--urgent" { urgent = true; rest.removeFirst() }
+            let text = TodayModel.oneLine(rest.joined(separator: " ")).trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { throw Failure(message: "What's the task? today add Call the bank") }
+            guard file.items.count < Store.maxItems else { throw Failure(message: "That's \(Store.maxItems) already — plenty for one day.") }
+            var item = Item(text: text)
+            if urgent {
+                guard urgentCount(file) < Store.maxUrgent else { throw Failure(message: "\(Store.maxUrgent) tasks are already urgent — finish one first.") }
+                item.urgent = true
+            }
+            file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
+            return (file, "Added: \(text)")
+        }
+
+        guard commands.contains(command) else { throw Failure(message: "Unknown command \"\(command)\".\n\n" + usage) }
+        guard let arg = rest.first, let n = Int(arg) else { throw Failure(message: "Which task? Give its number, e.g. today \(command) 2") }
+        guard file.items.indices.contains(n - 1) else {
+            throw Failure(message: file.items.isEmpty ? "The list is empty." : "No task \(n); there are \(file.items.count).")
+        }
+        var item = file.items[n - 1]
+        switch command {
+        case "done":
+            file.items.remove(at: n - 1)
+            item.done.toggle()
+            if item.done, file.now == item.id { file.now = nil; file.nowSince = nil }  // finishing it ends "now"
+            if !item.done, item.urgent, urgentCount(file) >= Store.maxUrgent { item.urgent = false }
+            file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
+            return (file, (item.done ? "Done: " : "Reopened: ") + item.text)
+        case "now":
+            guard !item.done else { throw Failure(message: "Task \(n) is done; reopen it first with today done \(n).") }
+            if file.now == item.id {
+                file.now = nil; file.nowSince = nil
+                return (file, "Unpinned: \(item.text)")
+            }
+            file.now = item.id; file.nowSince = now
+            return (file, "Working on: \(item.text)")
+        case "urgent":
+            guard !item.done else { throw Failure(message: "Task \(n) is done, so it can't be urgent.") }
+            if !item.urgent, urgentCount(file) >= Store.maxUrgent {
+                throw Failure(message: "\(Store.maxUrgent) tasks are already urgent — finish one first.")
+            }
+            file.items.remove(at: n - 1)
+            item.urgent.toggle()
+            file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
+            return (file, (item.urgent ? "Urgent: " : "No longer urgent: ") + item.text)
+        default:  // rm
+            file.items.remove(at: n - 1)
+            if file.now == item.id { file.now = nil; file.nowSince = nil }
+            return (file, "Removed: \(item.text)")
+        }
     }
-    exit(0)
+
+    static func urgentCount(_ file: Store.File) -> Int { file.items.filter { $0.urgent && !$0.done }.count }
+
+    /// The list, numbered the way the commands count.
+    static func render(_ file: Store.File, now: Date) -> String {
+        let done = file.items.filter(\.done).count
+        guard !file.items.isEmpty else { return "Nothing on today's list yet. Add one: today add <task>" }
+        var lines = ["Today · \(done) of \(file.items.count) done"]
+        let width = String(file.items.count).count
+        for (i, item) in file.items.enumerated() {
+            let number = String(repeating: " ", count: width - String(i + 1).count) + String(i + 1)
+            let isNow = item.id == file.now && !item.done
+            let mark = item.done ? "✓" : isNow ? "◐" : "○"
+            var text = (item.urgent && !item.done ? "! " : "") + item.text
+            if isNow, let since = file.nowSince { text += " · " + ItemRow.elapsed(from: since, to: now) }
+            lines.append("\(number)  \(mark) \(text)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func run(_ args: [String]) -> Int32 {
+        do {
+            let (changed, message) = try perform(args, on: Store.load())
+            print(message)
+            if let changed {
+                Store.save(changed.items, now: changed.now, since: changed.nowSince)
+                // Numbers shift as tasks move, so show the new ones.
+                print("\n" + render(changed, now: Date()))
+            }
+            return 0
+        } catch let failure as Failure {
+            FileHandle.standardError.write(Data((failure.message + "\n").utf8))
+            return 1
+        } catch {
+            return 1
+        }
+    }
+}
+
+// Run as `today` (the command install adds), or with a command word, it's the CLI;
+// launched plainly, it's the HUD.
+let invokedAs = URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent
+let cliArgs = Array(CommandLine.arguments.dropFirst())
+if invokedAs == "today" || cliArgs.first.map(CLI.commands.contains) == true || cliArgs.first == "--print" {
+    exit(CLI.run(cliArgs.first == "--print" ? [] : cliArgs))
 }
 
 // One instance only (launchd and a manual `open` could both start it).

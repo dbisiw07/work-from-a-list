@@ -59,3 +59,16 @@ PLIST
 
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Installed. Work from a List is running and will start at login."
+
+# The `today` command: your list from any terminal. Linked into the first folder
+# on your PATH that we can write to without sudo.
+BIN="$APP_DIR/Contents/MacOS/WorkFromAList"
+for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+  [ "$dir" = "$HOME/.local/bin" ] && mkdir -p "$dir"
+  if [ -d "$dir" ] && [ -w "$dir" ]; then
+    ln -sf "$BIN" "$dir/today"
+    echo "Added the today command ($dir/today). Try: today add Call the bank"
+    case ":$PATH:" in *":$dir:"*) ;; *) echo "  (add $dir to your PATH to use it)";; esac
+    break
+  fi
+done
