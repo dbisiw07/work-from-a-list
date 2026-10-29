@@ -28,6 +28,11 @@ curl -fsSL https://raw.githubusercontent.com/dbisiw07/work-from-a-list/main/unin
 
 Your list and mantras stay unless you add `-s -- --all` after `sh`.
 
+The app isn't notarized by Apple yet. The line above installs it without a
+warning. If you download the zip from Releases in a browser instead, macOS
+will block it the first time: open System Settings → Privacy & Security and
+click Open Anyway.
+
 ## Using it
 
 - **Add:** click the add line ("Think, Break it down, Sweat the details and edges"), type a
