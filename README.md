@@ -15,14 +15,16 @@ the same on any wallpaper, in light or dark mode.
   task and press Return. The line stays ready for the next one. Press Return on
   an empty line, or Esc, and the keyboard goes back to the app you were in.
   Clicking the + also adds what you've typed.
-- **Check off:** click a task's circle. The circle pops and a line draws through
-  the text. Uncheck it to edit it again.
+- **Check off:** click a task's circle. It fills green with a pop, a line draws
+  through the text, and the task slides down below the open ones, so what's
+  left stays on top. Uncheck it to bring it back up and edit it again.
 - **Edit:** click a task's text. A task you edit down to nothing is removed.
 - **Remove:** hover a task and click ×. "Removed … Undo" shows in its place for
   5 seconds if you change your mind.
 - **Reorder:** drag a task up or down; the others slide out of the way.
 - **Working on now:** hover a task and click the pin. Its circle turns
-  half-filled and a green pin stays on it, and the menu bar shows that task
+  half-filled, a green pin stays on it with how long you've been on it ("40m",
+  updated once a minute), and the menu bar shows that task
   instead of the count, so you can see it from any app. Only one task can be
   "now": pinning another moves it, and checking it off or clicking the pin
   again clears it.

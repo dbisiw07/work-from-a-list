@@ -58,19 +58,21 @@ enum Store {
         var day: String
         var items: [Item]
         var now: UUID?
+        /// When you started on it.
+        var nowSince: Date?
     }
 
     static func load() -> File {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data),
               file.day == dayKey() else { return File(day: dayKey(), items: []) }
-        return File(day: file.day, items: Array(file.items.prefix(maxItems)), now: file.now)
+        return File(day: file.day, items: Array(file.items.prefix(maxItems)), now: file.now, nowSince: file.nowSince)
     }
 
-    static func save(_ items: [Item], now: UUID?) {
+    static func save(_ items: [Item], now: UUID?, since: Date?) {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(File(day: dayKey(), items: items, now: now)).write(to: url, options: .atomic)
+            try JSONEncoder().encode(File(day: dayKey(), items: items, now: now, nowSince: since)).write(to: url, options: .atomic)
         } catch {
             NSLog("Today HUD: couldn't save list: \(error)")
         }
@@ -85,8 +87,13 @@ final class TodayModel: ObservableObject {
     }
     /// The one item you're working on right now (like Linear's In Progress).
     @Published private(set) var nowId: UUID? = Store.load().now {
-        didSet { scheduleSave() }
+        didSet {
+            if nowId != oldValue { nowSince = nowId == nil ? nil : Date() }
+            scheduleSave()
+        }
     }
+    /// When you pinned the current "now" item, for the quiet "· 40m".
+    private(set) var nowSince: Date? = Store.load().nowSince ?? (Store.load().now == nil ? nil : Date())
     @Published var draft = ""
     @Published var hover = false
     @Published var hoveredRow: UUID?
@@ -123,7 +130,7 @@ final class TodayModel: ObservableObject {
     /// The row being dragged to a new place.
     @Published var draggingId: UUID?
     /// The last item you removed, offered back for a few seconds.
-    struct Removed { let item: Item; let index: Int; let wasNow: Bool }
+    struct Removed { let item: Item; let index: Int; let wasNow: Bool; let since: Date? }
     @Published private(set) var removed: Removed?
     private var undoWork: DispatchWorkItem?
     /// The item just checked off, so its row plays the strike once.
@@ -146,7 +153,7 @@ final class TodayModel: ObservableObject {
     var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
 
     func start() {
-        Store.save(items, now: nowItem?.id)  // replaces yesterday's file right away if the day has turned
+        Store.save(items, now: nowItem?.id, since: nowSince)  // replaces yesterday's file right away if the day has turned
         scheduleReset()
         // A timer doesn't fire while the Mac sleeps, so also check on wake and clock changes.
         let ws = NSWorkspace.shared.notificationCenter
@@ -188,8 +195,8 @@ final class TodayModel: ObservableObject {
     /// Writes shortly after the last change, so typing doesn't hit the disk per keystroke.
     private func scheduleSave() {
         saveWork?.cancel()
-        let snapshot = items, now = nowId
-        let work = DispatchWorkItem { Store.save(snapshot, now: now) }
+        let snapshot = items, now = nowId, since = nowSince
+        let work = DispatchWorkItem { Store.save(snapshot, now: now, since: since) }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
@@ -228,9 +235,15 @@ final class TodayModel: ObservableObject {
     func toggle(_ id: UUID) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         if !items[i].done { justChecked = id }
-        withAnimation(.easeOut(duration: 0.2)) {
-            items[i].done.toggle()
-            if items[i].done, nowId == id { nowId = nil }  // finishing it ends "now"
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            var item = items.remove(at: i)
+            item.done.toggle()
+            if item.done, nowId == id { nowId = nil }  // finishing it ends "now"
+            // Like Linear's status groups: open tasks on top, done ones below. A task
+            // you finish goes to the top of the done group, one you reopen to the
+            // bottom of the open ones.
+            let firstDone = items.firstIndex(where: \.done) ?? items.count
+            items.insert(item, at: firstDone)
         }
         if allDone { celebrate() }
     }
@@ -266,7 +279,7 @@ final class TodayModel: ObservableObject {
     func remove(_ id: UUID, undoable: Bool = true) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            if undoable { removed = Removed(item: items[i], index: i, wasNow: nowId == id) }
+            if undoable { removed = Removed(item: items[i], index: i, wasNow: nowId == id, since: nowSince) }
             items.remove(at: i)
         }
         rowFrames[id] = nil
@@ -287,7 +300,10 @@ final class TodayModel: ObservableObject {
         undoWork?.cancel()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
             items.insert(r.item, at: min(r.index, items.count))
-            if r.wasNow { nowId = r.item.id }
+            if r.wasNow {
+                nowId = r.item.id
+                nowSince = r.since
+            }
             removed = nil
         }
     }
@@ -369,6 +385,8 @@ enum Theme {
     static var accent: Color { choice.accent }
     static var green: Color { choice.green }
     static var progress: Color { choice.progress }
+    /// The check inside a done circle: white on Paper's green, card-dark on the mint.
+    static var checkMark: Color { choice.isLight ? .white : choice.card[1] }
     static var rule: Color { choice.rule }
 
     static func font(_ size: CGFloat, bold: Bool = false) -> Font {
@@ -543,9 +561,12 @@ struct ItemRow: View {
     var body: some View {
         HStack(spacing: 10 * scale) {
             // A half-filled circle marks the one in progress, like Linear.
-            Image(systemName: item.done ? "checkmark.circle" : isNow ? "circle.lefthalf.filled" : "circle")
+            // Empty → half-filled (now) → filled (done), like Linear.
+            Image(systemName: item.done ? "checkmark.circle.fill" : isNow ? "circle.lefthalf.filled" : "circle")
                 .font(.system(size: 17 * scale, weight: item.done || isNow ? .semibold : .regular))
-                .foregroundStyle(item.done ? Theme.green : isNow ? Theme.progress : hovered ? Theme.text : Theme.dim)
+                .symbolRenderingMode(item.done ? .palette : .monochrome)
+                .foregroundStyle(item.done ? Theme.checkMark : isNow ? Theme.progress : hovered ? Theme.text : Theme.dim,
+                                 Theme.green)
                 .scaleEffect(pop ? 1.3 : 1)
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -583,6 +604,16 @@ struct ItemRow: View {
                     .focused($hasFocus)
                     .onSubmit { finish() }
                     .onExitCommand { finish() }
+            }
+            if isNow, let since = model.nowSince {
+                // Redraws once a minute; nothing else ticks.
+                TimelineView(.periodic(from: since, by: 60)) { context in
+                    Text(Self.elapsed(from: since, to: context.date))
+                        .font(Theme.font(12 * scale))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.faint)
+                }
+                .help("Time since you started on this")
             }
             if !item.done {
                 Image(systemName: isNow ? "pin.fill" : "pin")
@@ -635,6 +666,14 @@ struct ItemRow: View {
         .onHover { inside in
             if inside { model.hoveredRow = item.id } else if hovered { model.hoveredRow = nil }
         }
+    }
+
+    /// "<1m", "40m", "1h 5m".
+    static func elapsed(from start: Date, to now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
+        if minutes < 1 { return "<1m" }
+        if minutes < 60 { return "\(minutes)m" }
+        return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
     }
 
     private func finish() {
