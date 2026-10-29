@@ -26,8 +26,9 @@ the same on any wallpaper, in light or dark mode.
 - The header shows the date and a ring with done/total. When the last item is
   checked off, the card glows green, says "All done ✓", and plays a soft chime.
 - At 25 items the add box is replaced by "That's 25 — plenty for one day."
-- Drag it anywhere and resize it from the bottom-right corner, or right-click →
-  Size. Change its look from Color. Hide it with the × in the header or ⌃⌥T. The menu bar shows done/total,
+- Drag it anywhere. Drag the right edge to make it wider for longer tasks (the
+  text stays the same size), or drag the bottom-right corner, or right-click →
+  Size, to scale the whole HUD. Change its look from Color. Hide it with the × in the header or ⌃⌥T. The menu bar shows done/total,
   and its menu lets you check items off, Clear Completed, toggle the chime,
   Reset Position and Quit.
 

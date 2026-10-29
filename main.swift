@@ -97,6 +97,14 @@ final class TodayModel: ObservableObject {
         didSet { UserDefaults.standard.set(Double(scale), forKey: "scale") }
     }
     static let scaleRange: ClosedRange<CGFloat> = 0.7...2.5
+    /// The card's width before scaling; drag the right edge to change it.
+    @Published var width: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: "width")
+        return saved > 0 ? saved : 300
+    }() {
+        didSet { UserDefaults.standard.set(Double(width), forKey: "width") }
+    }
+    static let widthRange: ClosedRange<CGFloat> = 240...600
     @Published var theme = Theme.choice {
         didSet {
             Theme.choice = theme
@@ -363,7 +371,7 @@ struct TodayView: View {
             }
         }
         .padding(16 * s)
-        .frame(width: 300 * s, alignment: .leading)
+        .frame(width: model.width * s, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom))
@@ -373,6 +381,7 @@ struct TodayView: View {
                 .strokeBorder(model.allDoneGlow ? Theme.green.opacity(0.85) : Theme.text.opacity(0.14),
                               lineWidth: model.allDoneGlow ? 2 * s : 1)
         )
+        .overlay(alignment: .trailing) { WidthEdge() }
         .overlay(alignment: .bottomTrailing) { ResizeGrip(model: model, scale: s) }
         .tint(Theme.accent)
         .contentShape(Rectangle())
@@ -592,6 +601,21 @@ struct FrameReporter: View {
     }
 }
 
+/// The right edge: drag it to make the card wider or narrower. Matches the
+/// zone the hosting view treats as a width drag.
+struct WidthEdge: View {
+    static let thickness: CGFloat = 6
+    var body: some View {
+        Color.clear
+            .frame(width: Self.thickness)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+    }
+}
+
 /// Sits in the bottom-right corner and reports where it is, so a drag starting
 /// there resizes instead of moving. Only visible while hovering.
 struct ResizeGrip: View {
@@ -750,7 +774,11 @@ final class HUDHostingView: NSHostingView<TodayView> {
     var onResize: ((CGFloat) -> Void)?
     var currentScale: (() -> CGFloat)?
     var isResizeZone: ((CGPoint) -> Bool)?
-    private enum Mode { case undecided, moving, resizing(scale: CGFloat, width: CGFloat) }
+    var currentWidth: (() -> CGFloat)?
+    var onWidth: ((CGFloat) -> Void)?
+    private enum Mode {
+        case undecided, moving, resizing(scale: CGFloat, width: CGFloat), widening(width: CGFloat, scale: CGFloat)
+    }
     private var pending: (event: NSEvent, mouse: NSPoint, origin: NSPoint)?
     private var mode = Mode.undecided
 
@@ -762,9 +790,13 @@ final class HUDHostingView: NSHostingView<TodayView> {
         pending = (event, NSEvent.mouseLocation, window?.frame.origin ?? .zero)
         var p = convert(event.locationInWindow, from: nil)
         if !isFlipped { p.y = bounds.height - p.y }
-        mode = isResizeZone?(p) == true
-            ? .resizing(scale: currentScale?() ?? 1, width: bounds.width)
-            : .undecided
+        if isResizeZone?(p) == true {
+            mode = .resizing(scale: currentScale?() ?? 1, width: bounds.width)
+        } else if p.x >= bounds.width - WidthEdge.thickness {
+            mode = .widening(width: currentWidth?() ?? 300, scale: currentScale?() ?? 1)
+        } else {
+            mode = .undecided
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -776,6 +808,8 @@ final class HUDHostingView: NSHostingView<TodayView> {
             // Follow whichever direction the cursor moved most; down/right grows.
             let d = abs(dx) > abs(dy) ? dx : -dy
             onResize?(scale * (width + d) / width)
+        case let .widening(width, scale):
+            onWidth?(width + dx / scale)
         case .undecided where hypot(dx, dy) < 3:
             return
         default:
@@ -788,7 +822,7 @@ final class HUDHostingView: NSHostingView<TodayView> {
         defer { pending = nil; mode = .undecided }
         guard let p = pending else { return super.mouseUp(with: event) }
         switch mode {
-        case .moving, .resizing:
+        case .moving, .resizing, .widening:
             onDragEnded?()
         case .undecided:
             super.mouseDown(with: p.event)
@@ -828,6 +862,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         host.currentScale = { [weak self] in self?.model.scale ?? 1 }
         host.onResize = { [weak self] in
             self?.model.scale = min(max($0, TodayModel.scaleRange.lowerBound), TodayModel.scaleRange.upperBound)
+        }
+        host.currentWidth = { [weak self] in self?.model.width ?? 300 }
+        host.onWidth = { [weak self] in
+            self?.model.width = min(max($0, TodayModel.widthRange.lowerBound), TodayModel.widthRange.upperBound)
         }
         host.isResizeZone = { [weak self] p in
             guard let grip = self?.model.gripRect, !grip.isEmpty else { return false }
