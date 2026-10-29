@@ -468,7 +468,7 @@ struct TodayView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10 * s) {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 5 * s) {
                 Group {
                     if model.allDone {
                         Text("All done ✓").foregroundColor(Theme.green)
@@ -500,6 +500,7 @@ struct TodayView: View {
             progress
         }
         .padding(.horizontal, 2 * s)
+        .padding(.bottom, 6 * s)
     }
 
     /// Done out of total, as a small ring.
