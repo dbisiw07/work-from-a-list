@@ -89,6 +89,12 @@ final class TodayModel: ObservableObject {
         didSet { UserDefaults.standard.set(Double(scale), forKey: "scale") }
     }
     static let scaleRange: ClosedRange<CGFloat> = 0.7...2.5
+    @Published var theme = Theme.choice {
+        didSet {
+            Theme.choice = theme
+            UserDefaults.standard.set(theme.rawValue, forKey: "theme")
+        }
+    }
     /// Where the resize grip is, in the hosting view's top-left coordinates.
     var gripRect: CGRect = .zero
     var onFinishEditing: (() -> Void)?
@@ -204,19 +210,66 @@ final class TodayModel: ObservableObject {
 
 // MARK: - Views
 
-/// A blackboard with chalk writing. The board is opaque on purpose: it reads the
+/// Solid color themes. Opaque on purpose: the list stands out and reads the
 /// same on any wallpaper, in light or dark mode, and skips a live blur.
-enum Chalk {
-    static let board = [Color(red: 0.13, green: 0.14, blue: 0.14), Color(red: 0.07, green: 0.08, blue: 0.08)]
-    static let white = Color(red: 0.97, green: 0.96, blue: 0.92)  // chalk is a touch warm
-    static let dim = white.opacity(0.65)
-    static let faint = white.opacity(0.42)
-    static let yellow = Color(red: 0.99, green: 0.88, blue: 0.52)
-    static let green = Color(red: 0.62, green: 0.93, blue: 0.62)
+enum ThemeChoice: String, CaseIterable, Identifiable {
+    case paper, teal, midnight, indigo, forest, plum, graphite
+    var id: Self { self }
 
-    /// Chalkboard SE ships with macOS; it looks hand-written but stays legible.
+    var label: String { rawValue.capitalized }
+    var isLight: Bool { self == .paper }
+
+    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color { Color(red: r, green: g, blue: b) }
+
+    /// Top and bottom of the card's gentle gradient.
+    var card: [Color] {
+        switch self {
+        case .teal: return [Self.rgb(0.05, 0.38, 0.40), Self.rgb(0.02, 0.25, 0.27)]
+        case .midnight: return [Self.rgb(0.09, 0.16, 0.36), Self.rgb(0.05, 0.09, 0.22)]
+        case .indigo: return [Self.rgb(0.29, 0.19, 0.58), Self.rgb(0.18, 0.11, 0.40)]
+        case .forest: return [Self.rgb(0.09, 0.32, 0.20), Self.rgb(0.04, 0.20, 0.12)]
+        case .plum: return [Self.rgb(0.45, 0.12, 0.27), Self.rgb(0.29, 0.06, 0.17)]
+        case .graphite: return [Color(white: 0.13), Color(white: 0.06)]
+        case .paper: return [.white, Self.rgb(0.97, 0.97, 0.96)]
+        }
+    }
+
+    var text: Color { isLight ? Self.rgb(0.09, 0.11, 0.18) : .white }  // ink on paper
+
+    /// Paper is a ruled notebook page: blue lines under each item, a red margin.
+    var ruled: Bool { self == .paper }
+    var rule: Color { ruled ? Self.rgb(0.55, 0.72, 0.93) : text.opacity(0.22) }
+    var margin: Color { Self.rgb(0.93, 0.42, 0.42) }
+
+    /// The add line and caret; picked to pop against each card.
+    var accent: Color {
+        switch self {
+        case .teal, .midnight, .forest: return Self.rgb(1.00, 0.86, 0.45)  // warm yellow
+        case .indigo, .plum: return Self.rgb(1.00, 0.78, 0.60)  // peach
+        case .graphite: return Self.rgb(0.45, 0.80, 1.00)  // sky blue
+        case .paper: return Self.rgb(0.15, 0.38, 0.90)  // blue ink
+        }
+    }
+
+    var green: Color { isLight ? Self.rgb(0.10, 0.55, 0.28) : Self.rgb(0.62, 1.00, 0.72) }
+
+    static var saved: ThemeChoice {
+        ThemeChoice(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .paper
+    }
+}
+
+enum Theme {
+    static var choice = ThemeChoice.saved
+    static var card: [Color] { choice.card }
+    static var text: Color { choice.text }
+    static var dim: Color { choice.text.opacity(choice.isLight ? 0.65 : 0.72) }
+    static var faint: Color { choice.text.opacity(choice.isLight ? 0.42 : 0.5) }
+    static var accent: Color { choice.accent }
+    static var green: Color { choice.green }
+    static var rule: Color { choice.rule }
+
     static func font(_ size: CGFloat, bold: Bool = false) -> Font {
-        .custom(bold ? "ChalkboardSE-Bold" : "ChalkboardSE-Regular", size: size)
+        .system(size: size, weight: bold ? .bold : .medium, design: .rounded)
     }
 }
 
@@ -229,44 +282,58 @@ struct TodayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8 * s) {
             header
-            // A chalk rule under the heading.
-            Capsule().fill(Chalk.white.opacity(0.22)).frame(height: 1.5 * s)
-            if !model.items.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(model.items) { item in
-                        ItemRow(model: model, item: item, scale: s)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+            // A thin rule under the heading.
+            Capsule().fill(Theme.rule).frame(height: 1.5 * s)
+            // The page: items and the add line, with a notebook margin on Paper
+            // between the checkboxes and the writing.
+            VStack(alignment: .leading, spacing: 8 * s) {
+                if !model.items.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(model.items) { item in
+                            ItemRow(model: model, item: item, scale: s)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
                 }
+                if model.isFull {
+                    Text("That's seven. Finish one before adding more.")
+                        .font(Theme.font(12 * s))
+                        .foregroundStyle(Theme.dim)
+                        .padding(.horizontal, 6 * s)
+                        .padding(.top, 2 * s)
+                } else {
+                    AddField(model: model, scale: s)
+                }
             }
-            if model.isFull {
-                Text("That's seven. Finish one before adding more.")
-                    .font(Chalk.font(12 * s))
-                    .foregroundStyle(Chalk.dim)
-                    .padding(.horizontal, 6 * s)
-                    .padding(.top, 2 * s)
-            } else {
-                AddField(model: model, scale: s)
+            .background(alignment: .leading) {
+                if Theme.choice.ruled {
+                    Rectangle().fill(Theme.choice.margin.opacity(0.55))
+                        .frame(width: 1.5 * s)
+                        .padding(.leading, 29 * s)
+                }
             }
         }
         .padding(16 * s)
         .frame(width: 300 * s, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(LinearGradient(colors: Chalk.board, startPoint: .top, endPoint: .bottom))
+                .fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom))
         )
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(model.allDoneGlow ? Chalk.green.opacity(0.85) : Chalk.white.opacity(0.14),
+                .strokeBorder(model.allDoneGlow ? Theme.green.opacity(0.85) : Theme.text.opacity(0.14),
                               lineWidth: model.allDoneGlow ? 2 * s : 1)
         )
         .overlay(alignment: .bottomTrailing) { ResizeGrip(model: model, scale: s) }
-        .tint(Chalk.yellow)  // chalk-colored caret instead of system blue
+        .tint(Theme.accent)
         .contentShape(Rectangle())
         .onHover { if model.hover != $0 { model.hover = $0 } }
         .contextMenu {
             Picker("Size", selection: $model.scale) {
                 ForEach(HUDSize.allCases) { Text($0.label).tag($0.scale) }
+            }
+            Picker("Color", selection: $model.theme) {
+                ForEach(ThemeChoice.allCases) { Text($0.label).tag($0) }
             }
             if model.doneCount > 0 { Button("Clear Completed") { model.clearDone() } }
             Button("Hide HUD (keep menu bar icon)") { model.onHide?() }
@@ -278,18 +345,18 @@ struct TodayView: View {
         HStack(alignment: .center, spacing: 10 * s) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(model.allDone ? "All done ✓" : "Today")
-                    .font(Chalk.font(22 * s, bold: true))
-                    .foregroundStyle(model.allDone ? Chalk.green : Chalk.white)
+                    .font(Theme.font(22 * s, bold: true))
+                    .foregroundStyle(model.allDone ? Theme.green : Theme.text)
                 Text(Store.day().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(Chalk.font(12 * s))
-                    .foregroundStyle(Chalk.dim)
+                    .font(Theme.font(12 * s))
+                    .foregroundStyle(Theme.dim)
             }
             Spacer(minLength: 0)
             if model.hover {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 15 * s))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Chalk.white)
+                    .foregroundStyle(Theme.text)
                     .contentShape(Rectangle())
                     .onTapGesture { model.onHide?() }
                     .help("Hide HUD — stays in the menu bar (⌃⌥T brings it back)")
@@ -299,21 +366,21 @@ struct TodayView: View {
         .padding(.horizontal, 2 * s)
     }
 
-    /// Done out of total, as a chalk ring.
+    /// Done out of total, as a small ring.
     private var progress: some View {
         let total = model.items.count
         let fraction = total == 0 ? 0 : CGFloat(model.doneCount) / CGFloat(total)
         return ZStack {
-            Circle().stroke(Chalk.white.opacity(0.12), lineWidth: 3.5 * s)
+            Circle().stroke(Theme.text.opacity(0.12), lineWidth: 3.5 * s)
             Circle()
                 .trim(from: 0, to: fraction)
-                .stroke(model.allDone ? Chalk.green : Chalk.white,
+                .stroke(model.allDone ? Theme.green : Theme.text,
                         style: StrokeStyle(lineWidth: 3.5 * s, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(model.doneCount)/\(total)")
-                .font(Chalk.font(11 * s, bold: true))
+                .font(Theme.font(11 * s, bold: true))
                 .monospacedDigit()
-                .foregroundStyle(Chalk.white)
+                .foregroundStyle(Theme.text)
         }
         .frame(width: 38 * s, height: 38 * s)
         .animation(.easeOut(duration: 0.3), value: fraction)
@@ -328,38 +395,38 @@ struct ItemRow: View {
     @FocusState private var hasFocus: Bool
 
     private var hovered: Bool { model.hoveredRow == item.id }
-    private var font: Font { Chalk.font(15 * scale) }
+    private var font: Font { Theme.font(15 * scale) }
 
     var body: some View {
         HStack(spacing: 10 * scale) {
             Image(systemName: item.done ? "checkmark.circle" : "circle")
                 .font(.system(size: 17 * scale, weight: item.done ? .semibold : .regular))
-                .foregroundStyle(item.done ? Chalk.green : hovered ? Chalk.white : Chalk.dim)
+                .foregroundStyle(item.done ? Theme.green : hovered ? Theme.text : Theme.dim)
                 .contentShape(Rectangle())
                 .onTapGesture { model.toggle(item.id) }
                 .help(item.done ? "Mark as not done" : "Mark as done")
             TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
                 .textFieldStyle(.plain)
                 .font(font)
-                .foregroundStyle(item.done ? Chalk.faint : Chalk.white)
+                .foregroundStyle(item.done ? Theme.faint : Theme.text)
                 .lineLimit(1)
                 .focused($hasFocus)
                 .onSubmit { finish() }
                 .onExitCommand { finish() }
-                // Text fields can't strike through, so a chalk line is drawn over done items.
+                // Text fields can't strike through, so a line is drawn over done items.
                 .overlay(alignment: .leading) {
                     if item.done && !hasFocus {
                         Text(item.text)
                             .font(font)
                             .lineLimit(1)
                             .hidden()
-                            .overlay { Capsule().fill(Chalk.faint).frame(height: 1.5 * scale) }
+                            .overlay { Capsule().fill(Theme.faint).frame(height: 1.5 * scale) }
                             .allowsHitTesting(false)
                     }
                 }
             Image(systemName: "xmark")
                 .font(.system(size: 9 * scale, weight: .bold))
-                .foregroundStyle(Chalk.dim)
+                .foregroundStyle(Theme.dim)
                 .frame(width: 16 * scale, height: 16 * scale)
                 .contentShape(Rectangle())
                 .onTapGesture { model.remove(item.id) }
@@ -370,8 +437,11 @@ struct ItemRow: View {
         .padding(.horizontal, 6 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
-                .fill(Chalk.white.opacity(hovered ? 0.06 : 0))
+                .fill(Theme.text.opacity(hovered ? 0.06 : 0))
         )
+        .overlay(alignment: .bottom) {
+            if Theme.choice.ruled { Rectangle().fill(Theme.rule.opacity(0.6)).frame(height: 1) }
+        }
         .onHover { inside in
             if inside { model.hoveredRow = item.id } else if hovered { model.hoveredRow = nil }
         }
@@ -384,7 +454,7 @@ struct ItemRow: View {
     }
 }
 
-/// A line to write on, like the next empty line of the board.
+/// The next empty line of the list.
 struct AddField: View {
     @ObservedObject var model: TodayModel
     let scale: CGFloat
@@ -396,14 +466,14 @@ struct AddField: View {
         HStack(spacing: 10 * scale) {
             Image(systemName: "plus")
                 .font(.system(size: 14 * scale, weight: .semibold))
-                .foregroundStyle(focused ? Chalk.yellow : Chalk.dim)
+                .foregroundStyle(focused ? Theme.accent : Theme.dim)
                 .frame(width: 17 * scale)
             TextField("", text: $model.draft,
                       prompt: Text(model.items.isEmpty ? "What matters today?" : "Add to today")
-                          .foregroundColor(Chalk.faint))
+                          .foregroundColor(Theme.faint))
                 .textFieldStyle(.plain)
-                .font(Chalk.font(15 * scale))
-                .foregroundStyle(Chalk.white)
+                .font(Theme.font(15 * scale))
+                .foregroundStyle(Theme.text)
                 .focused($hasFocus)
                 // Return adds and keeps the line ready for the next item.
                 .onSubmit {
@@ -417,7 +487,7 @@ struct AddField: View {
         .padding(.horizontal, 6 * scale)
         .overlay(alignment: .bottom) {
             Capsule()
-                .fill(focused ? Chalk.yellow.opacity(0.75) : Chalk.white.opacity(0.18))
+                .fill(focused ? Theme.accent.opacity(0.75) : Theme.choice.ruled ? Theme.rule.opacity(0.6) : Theme.text.opacity(0.18))
                 .frame(height: 1.5 * scale)
                 .padding(.horizontal, 6 * scale)
         }
@@ -602,7 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)  // white caret and menus on the board
+        applyAppearance()
 
         host = HUDHostingView(rootView: TodayView(model: model))
         host.sizingOptions = []
@@ -646,11 +716,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusItem()
             }
             .store(in: &subscriptions)
+        model.$theme.dropFirst().receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.applyAppearance() }
+            .store(in: &subscriptions)
         registerHotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey) { [weak self] in self?.toggleHUD() }
 
         setupStatusItem()
         model.start()
         updateVisibility()
+    }
+
+    /// Menus and text-field chrome follow the card: light on Paper, dark otherwise.
+    private func applyAppearance() {
+        panel.appearance = NSAppearance(named: model.theme.isLight ? .aqua : .darkAqua)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -757,6 +835,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.scale = size.scale
     }
 
+    @objc func setTheme(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let theme = ThemeChoice(rawValue: raw) else { return }
+        model.theme = theme
+    }
+
     @objc func resetPosition() {
         UserDefaults.standard.removeObject(forKey: "hudTopLeft")
         placeInitially()
@@ -801,6 +884,18 @@ extension AppDelegate: NSMenuDelegate {
         let sizeItem = NSMenuItem(title: "HUD Size", action: nil, keyEquivalent: "")
         sizeItem.submenu = sizes
         menu.addItem(sizeItem)
+
+        let colors = NSMenu()
+        for theme in ThemeChoice.allCases {
+            let item = NSMenuItem(title: theme.label, action: #selector(setTheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = theme.rawValue
+            item.state = model.theme == theme ? .on : .off
+            colors.addItem(item)
+        }
+        let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
+        colorItem.submenu = colors
+        menu.addItem(colorItem)
 
         if model.doneCount > 0 { add("Clear Completed", #selector(clearDone)) }
         add("Chime When All Done", #selector(toggleSound), checked: model.soundOn)
