@@ -1017,38 +1017,38 @@ struct MiniView: View {
     var body: some View {
         let item = model.topItem
         let isNow = item != nil && item?.id == model.nowItem?.id
-        HStack(spacing: 8 * s) {
+        HStack(spacing: 9 * s) {
             Image(systemName: item == nil ? "checkmark.circle.fill" : isNow ? "circle.lefthalf.filled" : "circle")
-                .font(.system(size: 13 * s, weight: isNow ? .semibold : .regular))
+                .font(.system(size: 15 * s, weight: isNow ? .semibold : .regular))
                 .foregroundStyle(item == nil ? Theme.green : isNow ? Theme.progress : Theme.dim)
             if item?.urgent == true {
                 Image(systemName: "exclamationmark.square.fill")
-                    .font(.system(size: 11 * s, weight: .semibold))
+                    .font(.system(size: 12 * s, weight: .semibold))
                     .foregroundStyle(Theme.urgent)
             }
             Text(item?.text ?? (model.items.isEmpty ? "Nothing on today's list" : "All done ✓"))
-                .font(Theme.font(13 * s))
+                .font(Theme.font(15 * s))
                 .foregroundStyle(item == nil ? Theme.dim : Theme.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: 220 * s, alignment: .leading)
+                .frame(maxWidth: 260 * s, alignment: .leading)
             if isNow, let since = model.nowSince {
                 // Room for "10h 5m", so the window never has to grow as the minutes tick.
                 TimelineView(.periodic(from: since, by: 60)) { context in
                     Text(ItemRow.elapsed(from: since, to: context.date))
-                        .font(Theme.font(11 * s))
+                        .font(Theme.font(12 * s))
                         .monospacedDigit()
                         .foregroundStyle(Theme.faint)
                 }
-                .frame(minWidth: 44 * s, alignment: .trailing)
+                .frame(minWidth: 50 * s, alignment: .trailing)
             }
             Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 9 * s, weight: .bold))
+                .font(.system(size: 10 * s, weight: .bold))
                 .foregroundStyle(Theme.dim)
                 .opacity(model.hover ? 1 : 0)
         }
-        .padding(.horizontal, 12 * s)
-        .padding(.vertical, 7 * s)
+        .padding(.horizontal, 15 * s)
+        .padding(.vertical, 9 * s)
         // Round ends, like Focus HUD.
         .background(Capsule().fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom)))
         .overlay(Capsule().strokeBorder(Theme.text.opacity(0.14), lineWidth: 1))
