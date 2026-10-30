@@ -303,6 +303,14 @@ final class TodayModel: ObservableObject {
     /// Lets the HUD take the keyboard for a click that isn't on a text field.
     var onTakeKeyboard: (() -> Void)?
     var onManageMantras: (() -> Void)?
+    /// Shrinks the HUD to one line in the top right corner, or opens it back up.
+    var onMini: ((Bool) -> Void)?
+    /// Shrunk to one line, out of the way. Remembered across restarts.
+    @Published var mini = UserDefaults.standard.bool(forKey: "hudMini") {
+        didSet { UserDefaults.standard.set(mini, forKey: "hudMini") }
+    }
+    /// Bumped to put the cursor on the add line.
+    @Published var focusAdd = 0
     var soundOn: Bool {
         get { UserDefaults.standard.object(forKey: "soundOn") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "soundOn") }
@@ -355,6 +363,12 @@ final class TodayModel: ObservableObject {
     var isFull: Bool { items.count >= Store.maxItems }
     var allDone: Bool { !items.isEmpty && doneCount == items.count }
     var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
+    /// What the small HUD shows.
+    var topItem: Item? { Self.top(of: items, now: nowId) }
+    /// The one you're working on, else the first not done.
+    static func top(of items: [Item], now: UUID?) -> Item? {
+        items.first { $0.id == now && !$0.done } ?? items.first { !$0.done }
+    }
     var urgentCount: Int { items.filter { $0.urgent && !$0.done }.count }
     var canMarkUrgent: Bool { urgentCount < Store.maxUrgent }
 
@@ -766,6 +780,10 @@ struct TodayView: View {
     private var radius: CGFloat { 16 * s }
 
     var body: some View {
+        if model.mini { MiniView(model: model) } else { full }
+    }
+
+    private var full: some View {
         VStack(alignment: .leading, spacing: 8 * s) {
             header
             // A thin rule under the heading.
@@ -856,6 +874,7 @@ struct TodayView: View {
                 ForEach(ThemeChoice.allCases) { Text($0.label).tag($0) }
             }
             if model.doneCount > 0 { Button("Clear Completed") { model.clearDone() } }
+            Button("Minimize to One Line") { model.onMini?(true) }
             Button("Hide HUD (keep menu bar icon)") { model.onHide?() }
         }
         .fixedSize()
@@ -915,7 +934,16 @@ struct TodayView: View {
                 }
             }
             Spacer(minLength: 0)
-            // Always takes its space, so the header doesn't reflow when you hover.
+            // These always take their space, so the header doesn't reflow when you hover.
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 15 * s))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Theme.text)
+                .contentShape(Rectangle())
+                .onTapGesture { model.onMini?(true) }
+                .help("Minimize — just the task you're on, in the top right corner")
+                .opacity(model.hover ? 1 : 0)
+                .allowsHitTesting(model.hover)
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 15 * s))
                 .symbolRenderingMode(.hierarchical)
@@ -950,6 +978,68 @@ struct TodayView: View {
         .frame(width: 38 * s, height: 38 * s)
         .animation(.easeOut(duration: 0.3), value: fraction)
         .help("\(model.doneCount) of \(total) done")
+    }
+}
+
+/// The HUD shrunk to one line: the task you're on, or the next one not done.
+/// Click it to open the full list.
+struct MiniView: View {
+    @ObservedObject var model: TodayModel
+
+    private var s: CGFloat { model.scale }
+
+    var body: some View {
+        let item = model.topItem
+        let isNow = item != nil && item?.id == model.nowItem?.id
+        HStack(spacing: 8 * s) {
+            Image(systemName: item == nil ? "checkmark.circle.fill" : isNow ? "circle.lefthalf.filled" : "circle")
+                .font(.system(size: 13 * s, weight: isNow ? .semibold : .regular))
+                .foregroundStyle(item == nil ? Theme.green : isNow ? Theme.progress : Theme.dim)
+            if item?.urgent == true {
+                Image(systemName: "exclamationmark.square.fill")
+                    .font(.system(size: 11 * s, weight: .semibold))
+                    .foregroundStyle(Theme.urgent)
+            }
+            Text(item?.text ?? (model.items.isEmpty ? "Nothing on today's list" : "All done ✓"))
+                .font(Theme.font(13 * s))
+                .foregroundStyle(item == nil ? Theme.dim : Theme.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 220 * s, alignment: .leading)
+            if isNow, let since = model.nowSince {
+                // Room for "10h 5m", so the window never has to grow as the minutes tick.
+                TimelineView(.periodic(from: since, by: 60)) { context in
+                    Text(ItemRow.elapsed(from: since, to: context.date))
+                        .font(Theme.font(11 * s))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.faint)
+                }
+                .frame(minWidth: 44 * s, alignment: .trailing)
+            }
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 9 * s, weight: .bold))
+                .foregroundStyle(Theme.dim)
+                .opacity(model.hover ? 1 : 0)
+        }
+        .padding(.horizontal, 10 * s)
+        .padding(.vertical, 6 * s)
+        .background(
+            RoundedRectangle(cornerRadius: 10 * s, style: .continuous)
+                .fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10 * s, style: .continuous)
+                .strokeBorder(Theme.text.opacity(0.14), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onHover { if model.hover != $0 { model.hover = $0 } }
+        .onTapGesture { model.onMini?(false) }
+        .contextMenu {
+            Button("Open the Full List") { model.onMini?(false) }
+            Button("Hide HUD (keep menu bar icon)") { model.onHide?() }
+        }
+        .help("Click to open the full list")
+        .fixedSize()
     }
 }
 
@@ -1262,6 +1352,7 @@ struct AddField: View {
                     if model.isFull { done() }
                 }
                 .onExitCommand { done() }
+                .onChange(of: model.focusAdd) { _ in hasFocus = true }
         }
         .padding(.vertical, 7 * scale)
         .padding(.horizontal, 6 * scale)
@@ -1470,6 +1561,8 @@ final class HUDHostingView: NSHostingView<TodayView> {
     var isResizeZone: ((CGPoint) -> Bool)?
     var currentWidth: (() -> CGFloat)?
     var onWidth: ((CGFloat) -> Void)?
+    /// Off while the HUD is one line.
+    var canResize: (() -> Bool)?
     private enum Mode {
         case undecided, moving, resizing(scale: CGFloat, width: CGFloat), widening(width: CGFloat, scale: CGFloat)
     }
@@ -1484,9 +1577,10 @@ final class HUDHostingView: NSHostingView<TodayView> {
         pending = (event, NSEvent.mouseLocation, window?.frame.origin ?? .zero)
         var p = convert(event.locationInWindow, from: nil)
         if !isFlipped { p.y = bounds.height - p.y }
-        if isResizeZone?(p) == true {
+        let resizable = canResize?() ?? true
+        if resizable, isResizeZone?(p) == true {
             mode = .resizing(scale: currentScale?() ?? 1, width: bounds.width)
-        } else if p.x >= bounds.width - WidthEdge.thickness {
+        } else if resizable, p.x >= bounds.width - WidthEdge.thickness {
             mode = .widening(width: currentWidth?() ?? 300, scale: currentScale?() ?? 1)
         } else {
             mode = .undecided
@@ -1566,7 +1660,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return grip.insetBy(dx: -4, dy: -4).contains(p)
         }
         host.onDragEnded = { [weak self] in self?.saveFrame() }
-        panel.rowAt = { [weak self] in self?.model.row(at: $0) }
+        host.canResize = { [weak self] in self?.model.mini == false }
+        panel.rowAt = { [weak self] in
+            guard let self, !self.model.mini else { return nil }
+            return self.model.row(at: $0)
+        }
         panel.onRowDragBegan = { [weak self] id in
             withAnimation(.easeOut(duration: 0.15)) { self?.model.draggingId = id }
         }
@@ -1583,6 +1681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateVisibility()
         }
         model.onManageMantras = { [weak self] in self?.manageMantras() }
+        model.onMini = { [weak self] in self?.setMini($0) }
         model.onTakeKeyboard = { [weak self] in
             self?.panel.allowKey = true
             self?.panel.makeKey()
@@ -1625,7 +1724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         model.start()
-        updateVisibility()
+        updateVisibility(focus: false)
     }
 
     /// Menus and text-field chrome follow the card: light on Paper, dark otherwise.
@@ -1639,12 +1738,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func saveFrame() {
+        guard !model.mini else { return }  // the corner spot isn't where the full list goes
         let f = panel.frame
         UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: f.minX, y: f.maxY)), forKey: "hudTopLeft")
     }
 
     private func placeInitially() {
         let size = panel.frame.size
+        if model.mini { return panel.setFrame(miniFrame(size), display: true) }
         if let saved = UserDefaults.standard.string(forKey: "hudTopLeft") {
             let topLeft = NSPointFromString(saved)
             let f = NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
@@ -1664,23 +1765,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let measured = NSHostingController(rootView: TodayView(model: model))
             .sizeThatFits(in: CGSize(width: 4000, height: 4000))
         let size = CGSize(width: ceil(measured.width), height: ceil(measured.height))
-        guard size.width > 0, size.height > 0, size != panel.frame.size else { return }
+        guard size.width > 0, size.height > 0 else { return }
         let f = panel.frame
-        panel.setFrame(NSRect(x: f.minX, y: f.maxY - size.height, width: size.width, height: size.height),
-                       display: true)
+        // The full card keeps its top-left corner; the one line stays in the top right corner.
+        let target = model.mini ? miniFrame(size)
+            : NSRect(x: f.minX, y: f.maxY - size.height, width: size.width, height: size.height)
+        guard target != f else { return }
+        panel.setFrame(target, display: true)
         panel.invalidateShadow()
     }
 
-    private func updateVisibility() {
+    /// The top right corner of the screen the HUD is on, just under the menu bar.
+    private func miniFrame(_ size: CGSize) -> NSRect {
+        guard let vf = (panel.screen ?? NSScreen.main)?.visibleFrame else { return panel.frame }
+        return NSRect(x: vf.maxX - size.width - 12, y: vf.maxY - size.height - 8,
+                      width: size.width, height: size.height)
+    }
+
+    private func setMini(_ on: Bool) {
+        guard model.mini != on else { return }
+        if on {
+            model.onFinishEditing?()
+            saveFrame()  // so the full list opens back up where it was
+        }
+        model.mini = on
+        fitToContent()
+        if !on {
+            placeInitially()
+            focusAddLine()
+        }
+    }
+
+    /// Puts the cursor on the add line, ready to type.
+    private func focusAddLine() {
+        guard shown, !model.mini, !model.isFull else { return }
+        panel.allowKey = true
+        panel.makeKey()
+        // After SwiftUI has drawn the add line, in case it just appeared.
+        DispatchQueue.main.async { [weak self] in self?.model.focusAdd += 1 }
+    }
+
+    /// `focus` puts the cursor on the add line when the HUD appears; at login it
+    /// shouldn't take the keyboard from whatever you're starting to type in.
+    private func updateVisibility(focus: Bool = true) {
         let want = !userHidden
         guard want != shown else { return }
         shown = want
         if want {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
-            // SwiftUI parks the cursor in the first field on its own, which shows a
-            // stray selection; nothing should be focused until you click in.
-            DispatchQueue.main.async { [weak self] in self?.panel.makeFirstResponder(nil) }
+            if focus && !model.mini {
+                focusAddLine()
+            } else {
+                // SwiftUI parks the cursor in the first field on its own, which shows a
+                // stray selection; nothing should be focused until you click in.
+                DispatchQueue.main.async { [weak self] in self?.panel.makeFirstResponder(nil) }
+            }
         } else {
             model.onFinishEditing?()
         }
@@ -1721,10 +1861,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
     }
 
+    /// ⌃⌥T: shows the full list ready to type, opening it from one line too; hides it if it's open.
     @objc func toggleHUD() {
-        userHidden.toggle()
+        if !userHidden && !model.mini {
+            userHidden = true
+            return updateVisibility()
+        }
+        userHidden = false
         updateVisibility()
+        setMini(false)
     }
+
+    @objc func minimize() { setMini(true) }
 
     @objc func toggleSound() { model.soundOn.toggle() }
 
@@ -1804,7 +1952,8 @@ extension AppDelegate: NSMenuDelegate {
             if let checked { item.state = checked ? .on : .off }
             menu.addItem(item)
         }
-        add(userHidden ? "Show HUD" : "Hide HUD", #selector(toggleHUD), key: "t")
+        add(userHidden ? "Show HUD" : model.mini ? "Open the Full List" : "Hide HUD", #selector(toggleHUD), key: "t")
+        if !userHidden && !model.mini { add("Minimize to One Line", #selector(minimize)) }
 
         let sizes = NSMenu()
         for size in HUDSize.allCases {
@@ -1896,6 +2045,12 @@ if CommandLine.arguments.contains("--test") {
     check(Mantras.pick(of: 0) == nil, "no mantras, nothing shown")
     check(Mantras.pick(of: 5, at: date(2026, 3, 10, 2)) != nil, "before the first block still shows one")
     check(Mantras.nextChange(after: date(2026, 3, 10, 9, 31)) > date(2026, 3, 10, 9, 31), "the next change is in the future")
+
+    // The one line the small HUD shows.
+    check(TodayModel.top(of: [b, a, c], now: c.id)?.id == c.id, "mini shows the task you're on")
+    check(TodayModel.top(of: [b, a, c], now: nil)?.id == a.id, "else the first not done")
+    check(TodayModel.top(of: [b, a, c], now: b.id)?.id == a.id, "a done task is never shown")
+    check(TodayModel.top(of: [b], now: nil) == nil, "nothing left, nothing shown")
 
     // The command line.
     func cli(_ args: [String], _ file: Store.File) -> Store.File? { (try? CLI.perform(args, on: file))?.0 }
