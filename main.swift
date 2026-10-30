@@ -279,6 +279,8 @@ final class TodayModel: ObservableObject {
         didSet { UserDefaults.standard.set(Double(width), forKey: "width") }
     }
     static let widthRange: ClosedRange<CGFloat> = 240...600
+    /// Narrower than this, the header's title and lines are hidden.
+    static let headerWidth: CGFloat = 280
     @Published var theme = Theme.choice {
         didSet {
             Theme.choice = theme
@@ -778,6 +780,7 @@ struct TodayView: View {
 
     private var s: CGFloat { model.scale }
     private var radius: CGFloat { 16 * s }
+    private var narrow: Bool { model.width < TodayModel.headerWidth }
 
     var body: some View {
         if model.mini { MiniView(model: model) } else { full }
@@ -906,31 +909,34 @@ struct TodayView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10 * s) {
-            VStack(alignment: .leading, spacing: 5 * s) {
-                Group {
-                    if model.allDone {
-                        Text("All done ✓").foregroundColor(Theme.green)
-                    } else {
-                        Text("Today").foregroundColor(Theme.text)
-                            + Text(trimmed(model.tagline).isEmpty ? "" : " – " + trimmed(model.tagline))
-                                .font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+            // At its narrowest the HUD is just the list: no title or header lines.
+            if !narrow {
+                VStack(alignment: .leading, spacing: 5 * s) {
+                    Group {
+                        if model.allDone {
+                            Text("All done ✓").foregroundColor(Theme.green)
+                        } else {
+                            Text("Today").foregroundColor(Theme.text)
+                                + Text(trimmed(model.tagline).isEmpty ? "" : " – " + trimmed(model.tagline))
+                                    .font(Theme.font(22 * s)).foregroundColor(Theme.dim)
+                        }
                     }
-                }
-                .font(Theme.font(22 * s, bold: true))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                if !trimmed(model.subtitle).isEmpty {
-                    Self.marked(trimmed(model.subtitle))
-                        .font(Theme.font(12 * s))
-                        .foregroundStyle(Theme.green)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !trimmed(model.motto).isEmpty {
-                    Self.marked(trimmed(model.motto))
-                        .font(Theme.font(12 * s))
-                        .foregroundStyle(Theme.dim)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 5 * s)
+                    .font(Theme.font(22 * s, bold: true))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    if !trimmed(model.subtitle).isEmpty {
+                        Self.marked(trimmed(model.subtitle))
+                            .font(Theme.font(12 * s))
+                            .foregroundStyle(Theme.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !trimmed(model.motto).isEmpty {
+                        Self.marked(trimmed(model.motto))
+                            .font(Theme.font(12 * s))
+                            .foregroundStyle(Theme.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 5 * s)
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -1021,17 +1027,12 @@ struct MiniView: View {
                 .foregroundStyle(Theme.dim)
                 .opacity(model.hover ? 1 : 0)
         }
-        .padding(.horizontal, 10 * s)
-        .padding(.vertical, 6 * s)
-        .background(
-            RoundedRectangle(cornerRadius: 10 * s, style: .continuous)
-                .fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10 * s, style: .continuous)
-                .strokeBorder(Theme.text.opacity(0.14), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
+        .padding(.horizontal, 12 * s)
+        .padding(.vertical, 7 * s)
+        // Round ends, like Focus HUD.
+        .background(Capsule().fill(LinearGradient(colors: Theme.card, startPoint: .top, endPoint: .bottom)))
+        .overlay(Capsule().strokeBorder(Theme.text.opacity(0.14), lineWidth: 1))
+        .contentShape(Capsule())
         .onHover { if model.hover != $0 { model.hover = $0 } }
         .onTapGesture { model.onMini?(false) }
         .contextMenu {
