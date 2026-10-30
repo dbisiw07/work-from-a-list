@@ -64,6 +64,7 @@ click Open Anyway.
 - **Move and size:** drag the header or empty space to move the HUD. Drag the
   right edge to make it wider for longer tasks (the text stays the same size);
   at its narrowest the title and header lines hide, leaving just the list.
+  Hover and click ↔ (or right-click → Widen) to go back to the width you had.
   Drag the bottom-right corner, or right-click → Size, to scale everything.
 - **Minimize:** click − in the header (or right-click → Minimize to One Line).
   The HUD shrinks to one small line in the top right corner, showing the task

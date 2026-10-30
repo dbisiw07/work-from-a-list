@@ -281,6 +281,14 @@ final class TodayModel: ObservableObject {
     static let widthRange: ClosedRange<CGFloat> = 240...600
     /// Narrower than this, the header's title and lines are hidden.
     static let headerWidth: CGFloat = 280
+    /// The width the narrow list widens back to: what it was before you narrowed it.
+    var wideWidth: CGFloat {
+        get { max(UserDefaults.standard.double(forKey: "wideWidth"), 400) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "wideWidth") }
+    }
+    /// Remembers the width a drag on the right edge starts from.
+    func widthDragBegan() { if width >= Self.headerWidth { wideWidth = width } }
+    func widen() { width = wideWidth }
     @Published var theme = Theme.choice {
         didSet {
             Theme.choice = theme
@@ -877,6 +885,7 @@ struct TodayView: View {
                 ForEach(ThemeChoice.allCases) { Text($0.label).tag($0) }
             }
             if model.doneCount > 0 { Button("Clear Completed") { model.clearDone() } }
+            if narrow { Button("Widen") { model.widen() } }
             Button("Minimize to One Line") { model.onMini?(true) }
             Button("Hide HUD (keep menu bar icon)") { model.onHide?() }
         }
@@ -941,6 +950,17 @@ struct TodayView: View {
             }
             Spacer(minLength: 0)
             // These always take their space, so the header doesn't reflow when you hover.
+            if narrow {
+                Image(systemName: "arrow.left.and.right.circle.fill")
+                    .font(.system(size: 15 * s))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Theme.text)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.widen() }
+                    .help("Widen — bring back the title and header")
+                    .opacity(model.hover ? 1 : 0)
+                    .allowsHitTesting(model.hover)
+            }
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 15 * s))
                 .symbolRenderingMode(.hierarchical)
@@ -1562,6 +1582,7 @@ final class HUDHostingView: NSHostingView<TodayView> {
     var isResizeZone: ((CGPoint) -> Bool)?
     var currentWidth: (() -> CGFloat)?
     var onWidth: ((CGFloat) -> Void)?
+    var onWidenBegan: (() -> Void)?
     /// Off while the HUD is one line.
     var canResize: (() -> Bool)?
     private enum Mode {
@@ -1583,6 +1604,7 @@ final class HUDHostingView: NSHostingView<TodayView> {
             mode = .resizing(scale: currentScale?() ?? 1, width: bounds.width)
         } else if resizable, p.x >= bounds.width - WidthEdge.thickness {
             mode = .widening(width: currentWidth?() ?? 300, scale: currentScale?() ?? 1)
+            onWidenBegan?()
         } else {
             mode = .undecided
         }
@@ -1661,6 +1683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return grip.insetBy(dx: -4, dy: -4).contains(p)
         }
         host.onDragEnded = { [weak self] in self?.saveFrame() }
+        host.onWidenBegan = { [weak self] in self?.model.widthDragBegan() }
         host.canResize = { [weak self] in self?.model.mini == false }
         panel.rowAt = { [weak self] in
             guard let self, !self.model.mini else { return nil }
