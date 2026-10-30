@@ -62,11 +62,18 @@ click Open Anyway.
   "All done ✓" and plays a soft chime (Chime When All Done in the menu bar
   turns it off).
 - **Move and size:** drag the header or empty space to move the HUD. Drag the
-  right edge to make it wider for longer tasks (the text stays the same size).
+  right edge to make it wider for longer tasks (the text stays the same size);
+  at its narrowest the title and header lines hide, leaving just the list.
+  Hover and click ↔ (or right-click → Widen) to go back to the width you had.
   Drag the bottom-right corner, or right-click → Size, to scale everything.
+- **Minimize:** click − in the header (or right-click → Minimize to One Line).
+  The HUD shrinks to one small line in the top right corner, showing the task
+  you're working on now, or else the top task that isn't done. Click it to open
+  the full list again, right where it was.
 - **Hide:** click × in the header or press ⌃⌥T; press ⌃⌥T again to bring it
-  back. The menu bar icon stays, and its menu lets you check tasks off, Clear
-  Completed, change Size and Color, Reset HUD Position and Quit.
+  back, with the cursor on the add line ready to type. From the one-line view,
+  ⌃⌥T opens the full list. The menu bar icon stays, and its menu lets you check
+  tasks off, Clear Completed, change Size and Color, Reset HUD Position and Quit.
 
 Past 10 tasks the list scrolls inside the card instead of growing down the
 screen. At 25 the add line says "That's 25 — plenty for one day."
