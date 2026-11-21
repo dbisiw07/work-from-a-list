@@ -3,7 +3,7 @@
 <p align="center"><img src="docs/screenshot.png" width="448" alt="Work from a List: a floating card titled Today, with an urgent task, a pinned task at 43 minutes, two open tasks, two done tasks struck through, and a mantra at the bottom"></p>
 
 A small floating list of what you're working on today. It sits above every
-app without taking focus, keeps up to 25 tasks, and clears what you finished each morning.
+app without taking focus, holds five signals at a time, and clears what you finished each morning.
 
 It looks like a ruled notebook page by default: white paper, dark ink, faint
 blue lines under each task, and a red margin. Right-click → Color, or menu bar
@@ -75,8 +75,19 @@ click Open Anyway.
   ⌃⌥T opens the full list. The menu bar icon stays, and its menu lets you check
   tasks off, Clear Completed, change Size and Color, Reset HUD Position and Quit.
 
-Past 10 tasks the list scrolls inside the card instead of growing down the
-screen. At 25 the add line says "That's 25 — plenty for one day."
+## Five signals
+
+A signal is one of the few things that matter today; the rest is noise. The
+list holds 5 open tasks. At 5 the add line gives way to "That's your 5
+signals — finish one to add another", and it comes back when you check one off
+(or remove one). Finished tasks stay on the card, struck through, until morning.
+`today add` follows the same rule.
+
+If your list already has more than 5 open tasks, from an earlier version or
+from yesterday, nothing is cut: it just takes no more until you're back under 5.
+
+Past 10 rows the list scrolls inside the card instead of growing down the
+screen.
 
 ## Mantras and header
 

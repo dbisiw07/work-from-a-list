@@ -1,4 +1,4 @@
-// Work from a List — a floating list of what you're working on today (up to 25 items).
+// Work from a List — a floating list of what you're working on today (five signals at a time).
 //
 // Each morning (5 am by default, before an early start) done tasks clear
 // and unfinished ones carry over, urgent flags included. There is no ticking timer: the
@@ -32,6 +32,10 @@ struct Item: Codable, Identifiable, Equatable {
 
 /// Override the reset time with `defaults write io.github.dbisiw07.work-from-a-list resetHour -int 5`.
 enum Store {
+    /// The few things that matter today. Once this many are open, you finish one
+    /// before you can add another; everything else is noise.
+    static let maxSignals = 5
+    /// Open and done together, so a long day's file stays small.
     static let maxItems = 25
     /// Urgent only means something if it's rare, so only a few at once (a WIP limit).
     static let maxUrgent = 3
@@ -97,6 +101,17 @@ enum Store {
 
     /// What the HUD last wrote or read, so it can tell its own saves from another app's.
     static var lastWritten: Data?
+
+    /// Why nothing can be added to `items` right now, or nil if there's room. A list
+    /// that already has more open tasks than the limit (from an older version, or
+    /// another app) is kept; it just takes no more until it's back under.
+    static func whyFull(_ items: [Item]) -> String? {
+        let open = items.filter { !$0.done }.count
+        if open == maxSignals { return "That's your \(maxSignals) signals — finish one to add another." }
+        if open > maxSignals { return "\(maxSignals) signals a day — finish \(open - maxSignals + 1) to add another." }
+        if items.count >= maxItems { return "That's \(maxItems) today — plenty for one day." }
+        return nil
+    }
 
     /// What a new day starts with: yesterday's unfinished tasks, in order, still urgent if they were.
     static func carryOver(_ items: [Item]) -> [Item] {
@@ -370,7 +385,8 @@ final class TodayModel: ObservableObject {
     }
 
     var doneCount: Int { items.filter(\.done).count }
-    var isFull: Bool { items.count >= Store.maxItems }
+    /// No room to add: five signals are open (or the day's list is at its cap).
+    var isFull: Bool { Store.whyFull(items) != nil }
     var allDone: Bool { !items.isEmpty && doneCount == items.count }
     var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
     /// What the small HUD shows.
@@ -680,7 +696,8 @@ final class TodayModel: ObservableObject {
 
     /// Puts the last removed item back where it was.
     func undoRemove() {
-        guard let r = removed, !isFull else { return }
+        // Putting back a done task is never one signal too many.
+        guard let r = removed, r.item.done ? items.count < Store.maxItems : !isFull else { return }
         undoWork?.cancel()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
             var item = r.item
@@ -816,11 +833,12 @@ struct TodayView: View {
                 } else if !model.items.isEmpty {
                     rows
                 }
-                if model.isFull {
-                    Text("That's 25 — plenty for one day.")
+                if let full = Store.whyFull(model.items) {
+                    Text(full)
                         .font(Theme.font(12 * s))
                         .foregroundStyle(Theme.dim)
-                        .padding(.horizontal, 6 * s)
+                        // In line with the tasks, clear of the notebook margin.
+                        .padding(.leading, 36 * s)
                         .padding(.top, 2 * s)
                 } else {
                     AddField(model: model, scale: s)
@@ -2096,6 +2114,16 @@ if CommandLine.arguments.contains("--test") {
     check(cli(["now", "1"], Store.File(day: today, items: [b])) == nil, "a done task can't be now")
     check((try? CLI.perform([], on: withDone))?.1.contains("1  ○ c") == true, "the list is numbered")
 
+    // Five signals: a sixth waits until one is finished.
+    let five = Store.File(day: today, items: (0..<Store.maxSignals).map { Item(text: "s\($0)") })
+    check(Store.whyFull(Array(five.items.dropLast())) == nil, "four open leaves room for one more")
+    check(Store.whyFull(five.items) != nil && cli(["add", "x"], five) == nil, "no sixth signal")
+    let fiveOneDone = cli(["done", "1"], five)!
+    check(cli(["add", "x"], fiveOneDone)?.items.filter { !$0.done }.count == Store.maxSignals, "finishing one makes room")
+    let tooMany = (0..<8).map { Item(text: "old\($0)") }
+    check(Store.carryOver(tooMany).count == 8, "a longer list from before is kept, not cut")
+    check(Store.whyFull(tooMany)?.contains("finish 4") == true, "and says how many to finish first")
+
     // Small formatting.
     let t0 = date(2026, 3, 10, 9)
     check(ItemRow.elapsed(from: t0, to: t0.addingTimeInterval(30)) == "0m", "under a minute is 0m")
@@ -2157,7 +2185,7 @@ enum CLI {
             if let flag = rest.first, flag == "-u" || flag == "--urgent" { urgent = true; rest.removeFirst() }
             let text = TodayModel.oneLine(rest.joined(separator: " ")).trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { throw Failure(message: "What's the task? today add Call the bank") }
-            guard file.items.count < Store.maxItems else { throw Failure(message: "That's \(Store.maxItems) already — plenty for one day.") }
+            if let full = Store.whyFull(file.items) { throw Failure(message: full) }
             var item = Item(text: text)
             if urgent {
                 guard urgentCount(file) < Store.maxUrgent else { throw Failure(message: "\(Store.maxUrgent) tasks are already urgent — finish one first.") }

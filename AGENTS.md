@@ -52,7 +52,8 @@ add a check next to the others at the bottom of `main.swift`.
   replaced with an empty one.
 - **The day turns at `resetHour` (5 am)**, by the clock hour, so daylight saving
   days work. Done tasks clear; open and urgent ones carry over; the pin clears.
-- **Small on purpose.** At most 25 tasks, 3 urgent, one "now". Every feature must
+- **Small on purpose.** At most 5 open tasks ("signals"; a sixth waits until one
+  is finished), 3 urgent, one "now". Every feature must
   keep the card calm and readable at a glance. Ask before adding settings.
 - **Looks like the code around it.** Short comments that say why, names a reader
   can guess, text written for the user (no jargon in the UI or README).
