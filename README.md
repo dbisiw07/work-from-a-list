@@ -3,7 +3,7 @@
 <p align="center"><img src="docs/screenshot.png" width="448" alt="Work from a List: a floating card titled Today, with an urgent task, a pinned task at 43 minutes, two open tasks, two done tasks struck through, and a mantra at the bottom"></p>
 
 A small floating list of what you're working on today. It sits above every
-app without taking focus, holds five signals at a time, and clears what you finished each morning.
+app without taking focus, holds five signals with a backlog for the rest, and clears what you finished each morning.
 
 It looks like a ruled notebook page by default: white paper, dark ink, faint
 blue lines under each task, and a red margin. Right-click → Color, or menu bar
@@ -75,16 +75,24 @@ click Open Anyway.
   ⌃⌥T opens the full list. The menu bar icon stays, and its menu lets you check
   tasks off, Clear Completed, change Size and Color, Reset HUD Position and Quit.
 
-## Five signals
+## Five signals and a backlog
 
 A signal is one of the few things that matter today; the rest is noise. The
-list holds 5 open tasks. At 5 the add line gives way to "That's your 5
-signals — finish one to add another", and it comes back when you check one off
-(or remove one). Finished tasks stay on the card, struck through, until morning.
-`today add` follows the same rule.
+top of the list holds up to 5 signals. Everything else waits under them in the
+**Backlog**, a single line ("Backlog · 6") that you click to open or close.
+
+- Add a task and it becomes a signal if there's room; with 5 signals on, it
+  goes to the backlog and the add line tells you so.
+- Hover a backlog task and click ↑ to make it a signal, once you've finished a
+  signal or moved one down. Hover a signal and click ↓ to move it to the backlog.
+- The ring and the counts are about today: signals and what's done. Urgent and
+  the "now" pin are for signals only.
+- Finished tasks stay on the card, struck through, until morning. The backlog
+  carries over to the next day as the backlog.
 
 If your list already has more than 5 open tasks, from an earlier version or
-from yesterday, nothing is cut: it just takes no more until you're back under 5.
+written by another app, the first 5 stay as signals and the rest move to the
+backlog. Nothing is cut.
 
 Past 10 rows the list scrolls inside the card instead of growing down the
 screen.
@@ -129,6 +137,7 @@ today add -u Pay rent  # urgent
 today done 2           # check off task 2 (again to reopen)
 today now 1            # pin task 1 as the one you're on
 today urgent 3         # flag or unflag task 3
+today later 3          # move task 3 to the backlog (again to make it a signal)
 today rm 4             # remove task 4
 ```
 
@@ -140,7 +149,7 @@ again, because numbers shift as tasks move (done ones sink, urgent ones rise).
 The HUD watches `today.json`, so a script, a Shortcut or anything else that
 writes the file shows up in the HUD and the menu bar within a moment. Write the
 same JSON the HUD writes: `{"day": "2026-10-29", "items": [{"text": "…"}]}`.
-Each item can also have `"done"` and `"urgent"` (true/false) and an `"id"`;
+Each item can also have `"done"`, `"urgent"` and `"later"` (in the backlog) as true/false, and an `"id"`;
 leave the id out for a new task and the HUD adds one. `"now"` is the id of the
 pinned task. A file from an earlier day gets the morning reset, and a
 half-written file is ignored until it's complete (or put back from the HUD's

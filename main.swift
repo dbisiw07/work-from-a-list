@@ -17,6 +17,8 @@ struct Item: Codable, Identifiable, Equatable {
     var done = false
     /// Must be done today. At most `Store.maxUrgent` open tasks at a time.
     var urgent = false
+    /// In the backlog: kept for later, not one of today's signals.
+    var later = false
 
     init(text: String) { self.text = text }
 
@@ -27,13 +29,14 @@ struct Item: Codable, Identifiable, Equatable {
         text = try c.decode(String.self, forKey: .text)
         done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
         urgent = try c.decodeIfPresent(Bool.self, forKey: .urgent) ?? false
+        later = try c.decodeIfPresent(Bool.self, forKey: .later) ?? false
     }
 }
 
 /// Override the reset time with `defaults write io.github.dbisiw07.work-from-a-list resetHour -int 5`.
 enum Store {
-    /// The few things that matter today. Once this many are open, you finish one
-    /// before you can add another; everything else is noise.
+    /// The few things that matter today. Once this many are open, anything else
+    /// waits in the backlog until you finish one or swap one out.
     static let maxSignals = 5
     /// Open and done together, so a long day's file stays small.
     static let maxItems = 25
@@ -95,27 +98,43 @@ enum Store {
         // flags; done ones and the "now" pin clear.
         guard file.day == dayKey() else { return File(day: dayKey(), items: carryOver(file.items)) }
         // Kept in the order you left it, including anything you dragged.
-        return File(day: file.day, items: Array(file.items.prefix(maxItems)),
-                    now: file.now, nowSince: file.nowSince)
+        let items = settled(Array(file.items.prefix(maxItems)))
+        // Only a signal can be the one you're on.
+        let now = file.now.flatMap { id in items.contains { $0.id == id && !$0.later } ? id : nil }
+        return File(day: file.day, items: items, now: now, nowSince: now == nil ? nil : file.nowSince)
     }
 
     /// What the HUD last wrote or read, so it can tell its own saves from another app's.
     static var lastWritten: Data?
 
-    /// Why nothing can be added to `items` right now, or nil if there's room. A list
-    /// that already has more open tasks than the limit (from an older version, or
-    /// another app) is kept; it just takes no more until it's back under.
+    /// Open tasks that aren't in the backlog.
+    static func signalCount(_ items: [Item]) -> Int { items.filter { !$0.done && !$0.later }.count }
+    static func hasRoomForSignal(_ items: [Item]) -> Bool { signalCount(items) < maxSignals }
+
+    /// Why nothing can be added to `items` right now, or nil if there's room.
     static func whyFull(_ items: [Item]) -> String? {
-        let open = items.filter { !$0.done }.count
-        if open == maxSignals { return "That's your \(maxSignals) signals — finish one to add another." }
-        if open > maxSignals { return "\(maxSignals) signals a day — finish \(open - maxSignals + 1) to add another." }
-        if items.count >= maxItems { return "That's \(maxItems) today — plenty for one day." }
-        return nil
+        items.count >= maxItems ? "That's \(maxItems) on the list — clear some first." : nil
     }
 
-    /// What a new day starts with: yesterday's unfinished tasks, in order, still urgent if they were.
+    /// The list in its three groups: signals, then the backlog, then done. Open
+    /// tasks past the fifth signal (a list from an older version, or one another
+    /// app wrote) move to the backlog; nothing is dropped.
+    static func settled(_ items: [Item]) -> [Item] {
+        var signals = 0
+        var items = items
+        for i in items.indices {
+            if items[i].done { items[i].later = false; continue }
+            if !items[i].later { signals += 1 }
+            if signals > maxSignals { items[i].later = true }
+            if items[i].later { items[i].urgent = false }
+        }
+        return items.filter { !$0.done && !$0.later } + items.filter { !$0.done && $0.later } + items.filter(\.done)
+    }
+
+    /// What a new day starts with: yesterday's unfinished tasks, in order, still urgent
+    /// if they were, and still in the backlog if that's where they were.
     static func carryOver(_ items: [Item]) -> [Item] {
-        Array(items.filter { !$0.done }.prefix(maxItems))
+        settled(Array(items.filter { !$0.done }.prefix(maxItems)))
     }
 
     static func save(_ items: [Item], now: UUID?, since: Date?) {
@@ -385,27 +404,41 @@ final class TodayModel: ObservableObject {
     }
 
     var doneCount: Int { items.filter(\.done).count }
-    /// No room to add: five signals are open (or the day's list is at its cap).
+    /// No room to add at all (the backlog takes what the signals can't).
     var isFull: Bool { Store.whyFull(items) != nil }
-    var allDone: Bool { !items.isEmpty && doneCount == items.count }
+    var canAddSignal: Bool { Store.hasRoomForSignal(items) }
+    var backlogCount: Int { items.filter(\.later).count }
+    /// Today's tasks: signals and what's done. The backlog isn't today's.
+    var todayCount: Int { items.count - backlogCount }
+    var allDone: Bool { todayCount > 0 && doneCount == todayCount }
+    /// Whether the backlog's rows are on show under its heading.
+    @Published var backlogShown = UserDefaults.standard.bool(forKey: "backlogShown") {
+        didSet {
+            UserDefaults.standard.set(backlogShown, forKey: "backlogShown")
+            if !backlogShown { for item in items where item.later { rowFrames[item.id] = nil } }
+        }
+    }
+    /// The rows the card draws.
+    var shownItems: [Item] { backlogShown ? items : items.filter { !$0.later } }
     var nowItem: Item? { items.first { $0.id == nowId && !$0.done } }
     /// What the small HUD shows.
     var topItem: Item? { Self.top(of: items, now: nowId) }
-    /// The one you're working on, else the first not done.
+    /// The one you're working on, else the first signal, else the first not done.
     static func top(of items: [Item], now: UUID?) -> Item? {
-        items.first { $0.id == now && !$0.done } ?? items.first { !$0.done }
+        items.first { $0.id == now && !$0.done } ?? items.first { !$0.done && !$0.later } ?? items.first { !$0.done }
     }
     var urgentCount: Int { items.filter { $0.urgent && !$0.done }.count }
     var canMarkUrgent: Bool { urgentCount < Store.maxUrgent }
 
-    /// Where an item belongs: urgent at the top, then other open tasks, then done
-    /// (newly finished ones at the top of the done group).
+    /// Where an item belongs: urgent at the top, then other signals, then the backlog
+    /// (new ones at its end), then done (newly finished ones at the top).
     private func slot(for item: Item) -> Int { Self.slot(for: item, in: items) }
 
     static func slot(for item: Item, in items: [Item]) -> Int {
         if item.done { return items.firstIndex(where: \.done) ?? items.count }
+        if item.later { return items.firstIndex(where: \.done) ?? items.count }
         if item.urgent { return items.firstIndex(where: { !$0.urgent || $0.done }) ?? items.count }
-        return items.firstIndex(where: \.done) ?? items.count
+        return items.firstIndex(where: { $0.later || $0.done }) ?? items.count
     }
 
     func start() {
@@ -604,7 +637,9 @@ final class TodayModel: ObservableObject {
     func add() {
         let text = Self.oneLine(draft).trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, !isFull else { return }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { items.append(Item(text: text)) }
+        var item = Item(text: text)
+        item.later = !canAddSignal  // five signals already: it waits in the backlog
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { items.insert(item, at: slot(for: item)) }
         draft = ""
     }
 
@@ -629,7 +664,9 @@ final class TodayModel: ObservableObject {
             var item = items.remove(at: i)
             item.done.toggle()
             if item.done, nowId == id { nowId = nil }  // finishing it ends "now"
-            // Reopening can't push urgent past the limit.
+            if item.done { item.later = false }
+            // Reopening can't push signals or urgent past their limits.
+            if !item.done, !canAddSignal { item.later = true; item.urgent = false }
             if !item.done, item.urgent, !canMarkUrgent { item.urgent = false }
             // Like Linear's status groups: open tasks on top, done ones below.
             items.insert(item, at: slot(for: item))
@@ -653,7 +690,8 @@ final class TodayModel: ObservableObject {
     func drag(to point: CGPoint) {
         guard let id = draggingId, let from = items.firstIndex(where: { $0.id == id }),
               let target = row(at: point), target != id,
-              let to = items.firstIndex(where: { $0.id == target }) else { return }
+              let to = items.firstIndex(where: { $0.id == target }),
+              items[to].later == items[from].later else { return }  // to change groups, use the arrow
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             items.insert(items.remove(at: from), at: to)
         }
@@ -661,7 +699,7 @@ final class TodayModel: ObservableObject {
 
     /// Flags a task as must-do-today and moves it up with the other urgent ones.
     func toggleUrgent(_ id: UUID) {
-        guard let i = items.firstIndex(where: { $0.id == id }), !items[i].done else { return }
+        guard let i = items.firstIndex(where: { $0.id == id }), !items[i].done, !items[i].later else { return }
         guard items[i].urgent || canMarkUrgent else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             var item = items.remove(at: i)
@@ -670,9 +708,26 @@ final class TodayModel: ObservableObject {
         }
     }
 
+    /// Moves a task between today's signals and the backlog. A sixth signal has to
+    /// wait: finish one or move one out first.
+    func toggleLater(_ id: UUID) {
+        guard let i = items.firstIndex(where: { $0.id == id }), !items[i].done else { return }
+        guard !items[i].later || canAddSignal else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            var item = items.remove(at: i)
+            item.later.toggle()
+            if item.later {
+                item.urgent = false
+                if nowId == id { nowId = nil }
+            }
+            items.insert(item, at: slot(for: item))
+        }
+    }
+
     /// Marks an item as the one you're working on now; there's only ever one.
     /// Tapping the current one again clears it.
     func setNow(_ id: UUID) {
+        guard items.contains(where: { $0.id == id && !$0.later }) else { return }
         withAnimation(.easeOut(duration: 0.2)) { nowId = nowId == id ? nil : id }
     }
 
@@ -696,14 +751,16 @@ final class TodayModel: ObservableObject {
 
     /// Puts the last removed item back where it was.
     func undoRemove() {
-        // Putting back a done task is never one signal too many.
-        guard let r = removed, r.item.done ? items.count < Store.maxItems : !isFull else { return }
+        guard let r = removed, !isFull else { return }
         undoWork?.cancel()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
             var item = r.item
             if item.urgent, !item.done, !canMarkUrgent { item.urgent = false }
-            items.insert(item, at: min(r.index, items.count))
-            if r.wasNow {
+            // Its place among the signals may have been taken meanwhile.
+            let displaced = !item.done && !item.later && !canAddSignal
+            if displaced { item.later = true; item.urgent = false }
+            items.insert(item, at: displaced ? slot(for: item) : min(r.index, items.count))
+            if r.wasNow, !displaced {
                 nowId = r.item.id
                 nowSince = r.since
             }
@@ -819,7 +876,7 @@ struct TodayView: View {
             // The page: items and the add line, with a notebook margin on Paper
             // between the checkboxes and the writing.
             VStack(alignment: .leading, spacing: 8 * s) {
-                if model.items.count > Store.visibleRows {
+                if model.shownItems.count > Store.visibleRows {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: true) { rows }
                             .frame(height: CGFloat(Store.visibleRows) * ItemRow.height(s))
@@ -914,15 +971,19 @@ struct TodayView: View {
         VStack(spacing: 0) {
             ForEach(Array(model.items.enumerated()), id: \.element.id) { i, item in
                 if let removed = model.removed, removed.index == i { UndoRow(model: model, removed: removed, scale: s) }
-                ItemRow(model: model, item: item, scale: s)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                // The backlog starts here: a quiet heading, and its rows only if opened.
+                if item.later, i == model.items.firstIndex(where: \.later) { BacklogHeading(model: model, scale: s) }
+                if !item.later || model.backlogShown {
+                    ItemRow(model: model, item: item, scale: s)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
             if let removed = model.removed, removed.index >= model.items.count {
                 UndoRow(model: model, removed: removed, scale: s)
             }
         }
         // Inside the scroll view the content runs past what's visible; that one reports instead.
-        .background(FrameReporter { if model.items.count <= Store.visibleRows { model.listRect = $0 } })
+        .background(FrameReporter { if model.shownItems.count <= Store.visibleRows { model.listRect = $0 } })
     }
 
     private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespaces) }
@@ -1005,7 +1066,7 @@ struct TodayView: View {
 
     /// Done out of total, as a small ring.
     private var progress: some View {
-        let total = model.items.count
+        let total = model.todayCount
         let fraction = total == 0 ? 0 : CGFloat(model.doneCount) / CGFloat(total)
         return ZStack {
             Circle().stroke(Theme.text.opacity(0.12), lineWidth: 3.5 * s)
@@ -1138,7 +1199,7 @@ struct ItemRow: View {
                 TextField("", text: Binding(get: { model.text(item.id) }, set: { model.setText(item.id, $0) }))
                     .textFieldStyle(.plain)
                     .font(font)
-                    .foregroundStyle(Theme.text)
+                    .foregroundStyle(item.later ? Theme.dim : Theme.text)
                     .lineLimit(1)
                     .focused($hasFocus)
                     .onSubmit { finish() }
@@ -1154,7 +1215,20 @@ struct ItemRow: View {
                 }
                 .help("Time since you started on this")
             }
-            if !item.done {
+            if !item.done, item.later {
+                let blocked = !model.canAddSignal
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 16 * scale, height: 16 * scale)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.toggleLater(item.id) }
+                    .opacity(hovered ? (blocked ? 0.35 : 1) : 0)
+                    .help(blocked ? "\(Store.maxSignals) signals already — finish one or move one down first" : "Make it one of today's signals")
+                    .accessibilityLabel("Make it a signal")
+                    .accessibilityAddTraits(.isButton)
+            }
+            if !item.done, !item.later {
                 let blocked = !item.urgent && !model.canMarkUrgent
                 Image(systemName: item.urgent ? "exclamationmark.square.fill" : "exclamationmark.square")
                     .font(.system(size: 12 * scale, weight: .semibold))
@@ -1178,6 +1252,16 @@ struct ItemRow: View {
                     .opacity(isNow || hovered ? 1 : 0)
                     .help(isNow ? "Stop working on this" : "Working on this now")
                     .accessibilityLabel(isNow ? "Stop working on this" : "Working on this now")
+                    .accessibilityAddTraits(.isButton)
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 16 * scale, height: 16 * scale)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.toggleLater(item.id) }
+                    .opacity(hovered ? 1 : 0)
+                    .help("Not today: move to the backlog")
+                    .accessibilityLabel("Move to the backlog")
                     .accessibilityAddTraits(.isButton)
             }
             Image(systemName: "xmark")
@@ -1231,6 +1315,34 @@ struct ItemRow: View {
         hasFocus = false
         model.commit(item.id)
         model.onFinishEditing?()
+    }
+}
+
+/// The line between today's signals and the backlog. Click to show or hide the backlog.
+struct BacklogHeading: View {
+    @ObservedObject var model: TodayModel
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 6 * scale) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9 * scale, weight: .bold))
+                .rotationEffect(.degrees(model.backlogShown ? 90 : 0))
+                .frame(width: 20.5 * scale)  // as wide as a row's circle
+            Text("Backlog · \(model.backlogCount)")
+                .font(Theme.font(12 * scale, bold: true))
+            Spacer()
+        }
+        .foregroundStyle(Theme.dim)
+        .frame(height: 26 * scale)
+        .padding(.horizontal, 6 * scale)
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { model.backlogShown.toggle() } }
+        .overlay(alignment: .bottom) {
+            if Theme.choice.ruled { Rectangle().fill(Theme.rule.opacity(0.6)).frame(height: 1) }
+        }
+        .help(model.backlogShown ? "Hide the backlog" : "Tasks for later. Today's signals are above.")
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -1378,7 +1490,9 @@ struct AddField: View {
                 .accessibilityLabel("Add")
                 .accessibilityAddTraits(.isButton)
             TextField("", text: $model.draft,
-                      prompt: Text(model.items.isEmpty ? "What matters today?" : "Think, Break it down, Sweat the details and edges")
+                      prompt: Text(model.items.isEmpty ? "What matters today?"
+                                   : model.canAddSignal ? "Think, Break it down, Sweat the details and edges"
+                                   : "\(Store.maxSignals) signals on — this one goes to the backlog")
                           .foregroundColor(Theme.faint))
                 .textFieldStyle(.plain)
                 .font(Theme.font(15 * scale))
@@ -1887,7 +2001,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        let total = model.items.count
+        let total = model.todayCount
         // While something is pinned as "now", the menu bar shows it instead of the count.
         let now = model.nowItem.map { $0.text.count > 30 ? $0.text.prefix(29) + "…" : $0.text }
         let title = now.map { " \($0)" } ?? (total == 0 ? "" : " \(model.doneCount)/\(total)")
@@ -1967,7 +2081,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let total = model.items.count
+        let total = model.todayCount
         menu.addItem(NSMenuItem(title: total == 0 ? "Nothing on today's list yet"
                                     : "Today · \(model.doneCount) of \(total) done",
                                 action: nil, keyEquivalent: ""))
@@ -1978,6 +2092,9 @@ extension AppDelegate: NSMenuDelegate {
             menu.addItem(entry)
         }
         for item in model.items {
+            if item.later, item.id == model.items.first(where: \.later)?.id {
+                menu.addItem(NSMenuItem(title: "Backlog", action: nil, keyEquivalent: ""))
+            }
             let title = item.urgent && !item.done ? "! " + short(item.text) : short(item.text)
             let entry = NSMenuItem(title: title, action: #selector(toggleItem(_:)), keyEquivalent: "")
             entry.target = self
@@ -2114,15 +2231,28 @@ if CommandLine.arguments.contains("--test") {
     check(cli(["now", "1"], Store.File(day: today, items: [b])) == nil, "a done task can't be now")
     check((try? CLI.perform([], on: withDone))?.1.contains("1  ○ c") == true, "the list is numbered")
 
-    // Five signals: a sixth waits until one is finished.
+    // Five signals; the rest waits in the backlog.
     let five = Store.File(day: today, items: (0..<Store.maxSignals).map { Item(text: "s\($0)") })
-    check(Store.whyFull(Array(five.items.dropLast())) == nil, "four open leaves room for one more")
-    check(Store.whyFull(five.items) != nil && cli(["add", "x"], five) == nil, "no sixth signal")
-    let fiveOneDone = cli(["done", "1"], five)!
-    check(cli(["add", "x"], fiveOneDone)?.items.filter { !$0.done }.count == Store.maxSignals, "finishing one makes room")
-    let tooMany = (0..<8).map { Item(text: "old\($0)") }
-    check(Store.carryOver(tooMany).count == 8, "a longer list from before is kept, not cut")
-    check(Store.whyFull(tooMany)?.contains("finish 4") == true, "and says how many to finish first")
+    let six = cli(["add", "x"], five)
+    check(six?.items.last?.later == true && Store.signalCount(six?.items ?? []) == Store.maxSignals, "a sixth task goes to the backlog")
+    check(cli(["add", "-u", "x"], five) == nil, "and can't be urgent there")
+    check(cli(["later", "6"], six!) == nil && cli(["now", "6"], six!) == nil, "the backlog can't jump the queue or be pinned")
+    let oneDone = cli(["done", "1"], six!)!
+    check(oneDone.items.map(\.text) == ["s1", "s2", "s3", "s4", "x", "s0"], "signals, then the backlog, then done")
+    let promoted = cli(["later", "5"], oneDone)
+    check(promoted?.items[4].later == false && Store.signalCount(promoted?.items ?? []) == Store.maxSignals, "finishing one makes room to promote")
+    check(cli(["done", "6"], promoted!)?.items.first { $0.text == "s0" }?.later == true, "reopening with five signals on lands in the backlog")
+    var pinnedFirst = five; pinnedFirst.now = five.items[0].id
+    let demoted = cli(["later", "1"], pinnedFirst)
+    check(demoted?.items.last?.text == "s0" && demoted?.now == nil, "moving the pinned task to the backlog unpins it")
+    var u = Item(text: "old"); u.urgent = true
+    let settled = Store.settled(Array(repeating: u, count: 3) + (0..<5).map { Item(text: "old\($0)") })
+    check(settled.count == 8 && Store.signalCount(settled) == Store.maxSignals, "a longer list from before is kept: five signals")
+    check(settled.suffix(3).allSatisfy { $0.later && !$0.urgent }, "and the rest in the backlog")
+    check(Store.carryOver(settled).map(\.later) == settled.map(\.later), "the backlog carries over as the backlog")
+    let old = json(#"{"day":"\#(today)","now":"\#(id)","items":[{"text":"a"},{"text":"b"},{"text":"c"},{"text":"d"},{"text":"e"},{"id":"\#(id)","text":"f"}]}"#)
+    check(old?.items.last?.later == true && old?.now == nil, "a sixth open task in a file moves to the backlog and loses the pin")
+    check(TodayModel.top(of: settled.reversed(), now: nil)?.later == false, "mini shows a signal before the backlog")
 
     // Small formatting.
     let t0 = date(2026, 3, 10, 9)
@@ -2159,7 +2289,7 @@ moveFromTodayHUD()
 /// `today …`: your list from a terminal, here or over SSH. Changes are written to
 /// today.json, and a running HUD shows them within a moment.
 enum CLI {
-    static let commands: Set<String> = ["list", "add", "done", "now", "urgent", "rm", "help", "--help", "-h"]
+    static let commands: Set<String> = ["list", "add", "done", "now", "urgent", "later", "rm", "help", "--help", "-h"]
 
     static let usage = """
     today                 show today's list
@@ -2167,6 +2297,7 @@ enum CLI {
     today done <n>        check off task n (again to reopen it)
     today now <n>         pin task n as the one you're on (again to unpin)
     today urgent <n>      flag or unflag task n as urgent
+    today later <n>       move task n to the backlog (again to make it a signal)
     today rm <n>          remove task n
     """
 
@@ -2187,12 +2318,14 @@ enum CLI {
             guard !text.isEmpty else { throw Failure(message: "What's the task? today add Call the bank") }
             if let full = Store.whyFull(file.items) { throw Failure(message: full) }
             var item = Item(text: text)
+            item.later = !Store.hasRoomForSignal(file.items)
             if urgent {
+                guard !item.later else { throw Failure(message: signalsFull) }
                 guard urgentCount(file) < Store.maxUrgent else { throw Failure(message: "\(Store.maxUrgent) tasks are already urgent — finish one first.") }
                 item.urgent = true
             }
             file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
-            return (file, "Added: \(text)")
+            return (file, (item.later ? "\(Store.maxSignals) signals are open, so it's in the backlog: " : "Added: ") + text)
         }
 
         guard commands.contains(command) else { throw Failure(message: "Unknown command \"\(command)\".\n\n" + usage) }
@@ -2206,11 +2339,25 @@ enum CLI {
             file.items.remove(at: n - 1)
             item.done.toggle()
             if item.done, file.now == item.id { file.now = nil; file.nowSince = nil }  // finishing it ends "now"
+            if item.done { item.later = false }
+            if !item.done, !Store.hasRoomForSignal(file.items) { item.later = true; item.urgent = false }
             if !item.done, item.urgent, urgentCount(file) >= Store.maxUrgent { item.urgent = false }
             file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
-            return (file, (item.done ? "Done: " : "Reopened: ") + item.text)
+            return (file, (item.done ? "Done: " : item.later ? "Reopened, in the backlog: " : "Reopened: ") + item.text)
+        case "later":
+            guard !item.done else { throw Failure(message: "Task \(n) is done; reopen it first with today done \(n).") }
+            guard !item.later || Store.hasRoomForSignal(file.items) else { throw Failure(message: signalsFull) }
+            file.items.remove(at: n - 1)
+            item.later.toggle()
+            if item.later {
+                item.urgent = false
+                if file.now == item.id { file.now = nil; file.nowSince = nil }
+            }
+            file.items.insert(item, at: TodayModel.slot(for: item, in: file.items))
+            return (file, (item.later ? "Moved to the backlog: " : "Now a signal: ") + item.text)
         case "now":
             guard !item.done else { throw Failure(message: "Task \(n) is done; reopen it first with today done \(n).") }
+            guard !item.later else { throw Failure(message: "Task \(n) is in the backlog; make it a signal first with today later \(n).") }
             if file.now == item.id {
                 file.now = nil; file.nowSince = nil
                 return (file, "Unpinned: \(item.text)")
@@ -2219,6 +2366,7 @@ enum CLI {
             return (file, "Working on: \(item.text)")
         case "urgent":
             guard !item.done else { throw Failure(message: "Task \(n) is done, so it can't be urgent.") }
+            guard !item.later else { throw Failure(message: "Task \(n) is in the backlog; make it a signal first with today later \(n).") }
             if !item.urgent, urgentCount(file) >= Store.maxUrgent {
                 throw Failure(message: "\(Store.maxUrgent) tasks are already urgent — finish one first.")
             }
@@ -2233,18 +2381,22 @@ enum CLI {
         }
     }
 
+    static let signalsFull = "\(Store.maxSignals) signals are open — finish one, or move one to the backlog with today later <n>."
+
     static func urgentCount(_ file: Store.File) -> Int { file.items.filter { $0.urgent && !$0.done }.count }
 
     /// The list, numbered the way the commands count.
     static func render(_ file: Store.File, now: Date) -> String {
         let done = file.items.filter(\.done).count
         guard !file.items.isEmpty else { return "Nothing on today's list yet. Add one: today add <task>" }
-        var lines = ["Today · \(done) of \(file.items.count) done"]
+        let backlog = file.items.filter(\.later).count
+        var lines = ["Today · \(done) of \(file.items.count - backlog) done"]
         let width = String(file.items.count).count
         for (i, item) in file.items.enumerated() {
+            if item.later, item.id == file.items.first(where: \.later)?.id { lines.append("Backlog · \(backlog)") }
             let number = String(repeating: " ", count: width - String(i + 1).count) + String(i + 1)
             let isNow = item.id == file.now && !item.done
-            let mark = item.done ? "✓" : isNow ? "◐" : "○"
+            let mark = item.done ? "✓" : isNow ? "◐" : item.later ? "·" : "○"
             var text = (item.urgent && !item.done ? "! " : "") + item.text
             if isNow, let since = file.nowSince { text += " · " + ItemRow.elapsed(from: since, to: now) }
             lines.append("\(number)  \(mark) \(text)")
